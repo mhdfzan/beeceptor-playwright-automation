@@ -53,12 +53,20 @@ test.describe('Beeceptor HTTP Callout Rule — E2E Workflow', () => {
     }
 
     // ─────────────────────────────────────────────────
-    // Step 2: Create a new mock endpoint
+    // Step 2: Create a new mock endpoint or reuse existing
     // ─────────────────────────────────────────────────
-    console.log('Step 2: Creating a new mock endpoint...');
-    endpointUrl = await dashboardPage.createEndpoint(endpointName);
-    await expect(page).toHaveURL(/console|app\.beeceptor/, { timeout: 20000 });
-    console.log(`✅ Endpoint created successfully`);
+    if (config.endpoint.name) {
+      console.log(`Step 2: Reusing existing mock endpoint: ${endpointName}...`);
+      await endpointPage.goto(endpointName);
+      console.log(`✅ Navigated to existing endpoint console`);
+    } else {
+      console.log('Step 2: Creating a new mock endpoint...');
+      endpointUrl = await dashboardPage.createEndpoint(endpointName);
+      
+      // Verify we navigated to the console (and not redirected to login page)
+      await expect(page).toHaveURL(/console/, { timeout: 25000 });
+      console.log(`✅ Endpoint created successfully`);
+    }
 
     // ─────────────────────────────────────────────────
     // Step 3: Navigate to Mocking Rules section
@@ -168,8 +176,12 @@ test.describe('Beeceptor HTTP Callout Rule — E2E Workflow', () => {
     }
 
     try {
-      await endpointPage.deleteEndpoint();
-      console.log('✅ Endpoint deleted');
+      if (config.endpoint.name) {
+        console.log('Skipping endpoint deletion since it is a reused endpoint.');
+      } else {
+        await endpointPage.deleteEndpoint();
+        console.log('✅ Endpoint deleted');
+      }
     } catch (e) {
       console.log('⚠️ Could not delete endpoint:', e.message);
     }

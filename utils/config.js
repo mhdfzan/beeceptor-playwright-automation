@@ -21,8 +21,12 @@ const config = {
 
   // Endpoint configuration
   endpoint: {
+    name: process.env.BEECEPTOR_ENDPOINT || '',
     /** Generate a unique endpoint name with timestamp */
     generateName: () => {
+      if (process.env.BEECEPTOR_ENDPOINT) {
+        return process.env.BEECEPTOR_ENDPOINT;
+      }
       const timestamp = Date.now();
       return `pw-test-${timestamp}`;
     },
