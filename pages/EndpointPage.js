@@ -25,15 +25,8 @@ class EndpointPage {
 
   /** Click on the Mocking Rules tab */
   async openMockingRules() {
-    // Try multiple strategies to find the Mocking Rules tab/link
-    const mockRulesTab = this.page.locator([
-      'text=Mocking Rules',
-      'a:has-text("Mocking Rules")',
-      'button:has-text("Mocking Rules")',
-      '[data-tab="rules"]',
-      'text=Mock Rules',
-    ].join(', '));
-
+    // Look for any link or button containing Mock Rules or Mocking Rules
+    const mockRulesTab = this.page.locator('a, button, div').filter({ hasText: /Mock Rules|Mocking Rules/ });
     await mockRulesTab.first().click();
     await this.page.waitForLoadState('networkidle');
   }

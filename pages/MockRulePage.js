@@ -18,23 +18,28 @@ class MockRulePage {
    * Handles different button variants (proxy/callout vs standard rule).
    */
   async clickCreateNewRule() {
+    // Dismiss onboarding if present
+    const skipBtn = this.page.locator('button:has-text("I\'ll explore myself!"), .skip-button').first();
+    if (await skipBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await skipBtn.click();
+      await this.page.waitForTimeout(500);
+    }
+
     // Wait for the rules section to load
     await this.page.waitForLoadState('networkidle');
     await this.page.waitForTimeout(1000);
 
-    // Try to find "Create Proxy or Callout" first (preferred for HTTP Callout)
-    const proxyCalloutButton = this.page.locator(
-      'button:has-text("Proxy"), button:has-text("Callout"), a:has-text("Proxy"), a:has-text("Callout")'
-    );
-
-    if (await proxyCalloutButton.isVisible({ timeout: 3000 }).catch(() => false)) {
-      await proxyCalloutButton.first().click();
+    // Try to find split dropdown toggle for rule types
+    const dropdownToggle = this.page.locator('.dropdown-toggle-split, button:has-text("Toggle Dropdown")').first();
+    if (await dropdownToggle.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await dropdownToggle.click();
+      await this.page.waitForTimeout(500);
+      const newCalloutRule = this.page.locator('a:has-text("New Callout Rule"), .dropdown-item:has-text("Callout")').first();
+      await newCalloutRule.click();
     } else {
-      // Fallback to generic "Create New Rule" button
-      const createRuleButton = this.page.locator(
-        'button:has-text("Create New Rule"), button:has-text("New Rule"), a:has-text("Create New Rule"), button:has-text("Add Rule"), a:has-text("New Rule")'
-      );
-      await createRuleButton.first().click();
+      // Fallback to generic "Create New Rule" or "New Rule" button
+      const createRuleBtn = this.page.locator('#createNew, button:has-text("New Rule"), button:has-text("Create New Rule")').first();
+      await createRuleBtn.click();
     }
 
     await this.page.waitForLoadState('networkidle');
@@ -117,65 +122,51 @@ class MockRulePage {
    * @param {string} [options.calloutBody] - Body/payload for the callout
    */
   async configureHttpCallout({ targetUrl, method = 'POST', calloutBody = '' }) {
-    // Look for the HTTP Callout / Asynchronous Request / Proxy section
-    // This might be a collapsible section, a tab, or a checkbox to enable
-    const calloutSection = this.page.locator(
-      'text=HTTP Callout, text=Asynchronous, text=Proxy, text=Callout, text=Forward, text=Target URL'
-    );
-
-    // Click to expand/enable the callout section if needed
-    if (await calloutSection.isVisible({ timeout: 5000 }).catch(() => false)) {
-      // Check if there's a toggle/checkbox to enable callout
-      const toggleOrCheckbox = this.page.locator(
-        'input[type="checkbox"]:near(:text("Callout")), input[type="checkbox"]:near(:text("Proxy")), input[type="checkbox"]:near(:text("Asynchronous")), label:has-text("Enable"):near(:text("Callout"))'
-      );
-      if (await toggleOrCheckbox.isVisible({ timeout: 2000 }).catch(() => false)) {
-        const isChecked = await toggleOrCheckbox.first().isChecked();
-        if (!isChecked) {
-          await toggleOrCheckbox.first().click();
-        }
+    // Find and expand the HTTP Callout accordion section
+    const calloutAccordion = this.page.locator('button:has-text("HTTP Callout"), button:has-text("Request Configuration"), .accordion-button').filter({ hasText: /Callout|Request/i }).first();
+    if (await calloutAccordion.isVisible({ timeout: 5000 }).catch(() => false)) {
+      const isCollapsed = await calloutAccordion.getAttribute('class').then(c => c ? c.includes('collapsed') : true);
+      if (isCollapsed) {
+        await calloutAccordion.click();
+        await this.page.waitForTimeout(1000);
       }
     }
 
     // Fill the Target URL
-    const targetUrlInput = this.page.locator(
-      'input[name*="target" i], input[placeholder*="target" i], input[name*="url" i]:near(:text("Target")), input[name*="callout" i], input[placeholder*="URL" i]:near(:text("Callout")), input[placeholder*="http" i]:near(:text("Target")), input[id*="proxy" i], input[name*="proxy" i]'
-    );
-    if (await targetUrlInput.isVisible({ timeout: 5000 }).catch(() => false)) {
-      await targetUrlInput.first().clear();
-      await targetUrlInput.first().fill(targetUrl);
-    }
+    const targetUrlInput = this.page.locator('input[placeholder*="http" i], input[name*="target" i], input[placeholder*="target" i], #targetUrl').first();
+    await targetUrlInput.waitFor({ state: 'visible', timeout: 5000 });
+    await targetUrlInput.clear();
+    await targetUrlInput.fill(targetUrl);
 
-    // Select callout method if available
-    const calloutMethodDropdown = this.page.locator(
-      'select:near(:text("Target")), select[name*="callout" i]'
-    );
+    // Select the callout method from the second #matchMethod dropdown (first is rule trigger method)
+    const calloutMethodDropdown = this.page.locator('#matchMethod').nth(1);
     if (await calloutMethodDropdown.isVisible({ timeout: 2000 }).catch(() => false)) {
-      try {
-        await calloutMethodDropdown.first().selectOption({ label: method });
-      } catch {
-        // Method might already be set or not a dropdown
-      }
+      await calloutMethodDropdown.selectOption({ label: method });
     }
 
-    // Fill callout body/payload if provided
-    if (calloutBody) {
-      const calloutBodyInput = this.page.locator(
-        'textarea:near(:text("Callout")), textarea:near(:text("Target")), textarea:near(:text("Payload")), textarea[name*="callout" i]'
-      );
-      if (await calloutBodyInput.isVisible({ timeout: 2000 }).catch(() => false)) {
-        await calloutBodyInput.first().clear();
-        await calloutBodyInput.first().fill(calloutBody);
+    // Configure payload transformation if custom body is provided
+    const transformDropdown = this.page.locator('#no-transform').first();
+    if (await transformDropdown.isVisible({ timeout: 2000 }).catch(() => false)) {
+      if (calloutBody) {
+        await transformDropdown.selectOption({ value: 'custom' }); // Build a custom payload
+        await this.page.waitForTimeout(500);
+        
+        // Fill custom callout body/payload
+        const calloutBodyInput = this.page.locator('textarea:near(:text("Payload")), textarea[name*="callout" i], textarea[placeholder*="{" i]').first();
+        if (await calloutBodyInput.isVisible({ timeout: 2000 }).catch(() => false)) {
+          await calloutBodyInput.clear();
+          await calloutBodyInput.fill(calloutBody);
+        }
+      } else {
+        await transformDropdown.selectOption({ value: 'original' }); // Forward original payload
       }
     }
   }
 
   /** Save the rule configuration */
   async saveRule() {
-    const saveButton = this.page.locator(
-      'button:has-text("Save"), input[type="submit"]:has-text("Save"), button[type="submit"]:has-text("Save"), button:has-text("Create Rule"), button:has-text("Save Rule")'
-    );
-    await saveButton.first().click();
+    const saveButton = this.page.locator('#saveProxy, #saveCrud, button:has-text("Save"), button:has-text("Create Rule")').first();
+    await saveButton.click();
     await this.page.waitForLoadState('networkidle');
     await this.page.waitForTimeout(2000);
   }
