@@ -1,0 +1,28 @@
+{
+  "name": "beeceptor-playwright-automation",
+  "version": "1.0.0",
+  "description": "Playwright E2E automation for Beeceptor's HTTP Callout Rule feature",
+  "main": "index.js",
+  "scripts": {
+    "test": "npx playwright test",
+    "test:headed": "npx playwright test --headed",
+    "test:debug": "npx playwright test --debug",
+    "test:slow": "SLOW_MO=500 npx playwright test --headed",
+    "report": "npx playwright show-report",
+    "install:browsers": "npx playwright install chromium"
+  },
+  "keywords": [
+    "playwright",
+    "beeceptor",
+    "automation",
+    "e2e-testing",
+    "http-callout",
+    "mock-api"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@playwright/test": "^1.61.1",
+    "dotenv": "^17.4.2"
+  }
+}
