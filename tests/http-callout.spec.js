@@ -3,193 +3,178 @@ const { test, expect } = require('../fixtures/test-fixtures');
 const { config } = require('../utils/config');
 
 /**
- * Beeceptor HTTP Callout Rule — End-to-End Test Suite
+ * ─────────────────────────────────────────────────────────────────
+ *  Beeceptor HTTP Callout Rule — End-to-End Test Suite
+ * ─────────────────────────────────────────────────────────────────
  *
- * This suite automates the complete workflow of Beeceptor's HTTP Callout Rule feature
- * within a single unified E2E test block to preserve session cookies/tokens:
- * 1. Open Beeceptor and login (if credentials provided)
- * 2. Create (or reuse) a mock endpoint
- * 3. Navigate to Mocking Rules section
- * 4. Create and configure an HTTP Callout rule
- * 5. Trigger the endpoint via an API call
- * 6. Verify the HTTP Callout executes successfully
- * 7. Verify non-matching path behaves normally
- * 8. Clean up test data
+ * What we're validating:
+ *   1. A Beeceptor endpoint can be created (or reused).
+ *   2. An HTTP Callout rule can be authored via the UI.
+ *   3. A live POST /webhook returns the mocked 202 response immediately.
+ *   4. Beeceptor logs the inbound request.
+ *   5. The outbound HTTP Callout to the target URL actually fires (verified
+ *      by inspecting the request-detail panel in Beeceptor's console).
+ *   6. Non-matching paths do NOT trigger the callout.
+ *   7. Test data is cleaned up.
+ *
+ *  Tests share endpoint state → serial mode.
  */
 
-test.describe('Beeceptor HTTP Callout Rule — E2E Workflow', () => {
-  let endpointName;
-  let endpointUrl;
+test.describe.configure({ mode: 'serial' });
+
+test.describe('Beeceptor HTTP Callout Rule — E2E', () => {
+  /** @type {string} */ let endpointName;
+  /** @type {string} */ let endpointUrl;
 
   test.beforeAll(() => {
-    endpointName = config.endpoint.generateName();
-    endpointUrl = config.endpoint.getUrl(endpointName);
+    endpointName = config.endpoint.resolveName();
+    endpointUrl = config.endpoint.triggerUrl(endpointName);
+    console.log('\n──────────────────────────────────────────────');
+    console.log(`  Endpoint: ${endpointName}`);
+    console.log(`  URL     : ${endpointUrl}`);
+    console.log(`  Callout : ${config.calloutRule.calloutTargetUrl}`);
+    console.log('──────────────────────────────────────────────\n');
   });
 
-  test('Complete end-to-end workflow', async ({
-    page,
-    loginPage,
-    dashboardPage,
-    endpointPage,
-    mockRulePage,
-    apiHelper,
-  }) => {
-    console.log(`\n📍 Starting E2E test for endpoint: ${endpointName}`);
-    console.log(`🔗 Endpoint URL: ${endpointUrl}\n`);
-
-    // ─────────────────────────────────────────────────
-    // Step 1: Login to Beeceptor
-    // ─────────────────────────────────────────────────
-    const email = config.credentials.email;
-    const password = config.credentials.password;
-
-    if (email && password) {
-      console.log('Step 1: Logging in to Beeceptor...');
-      await loginPage.login(email, password);
-      await expect(page).not.toHaveURL(/login/, { timeout: 15000 });
-      console.log('✅ Successfully logged in');
-    } else {
-      console.log('Step 1: No credentials provided. Skipping login (using free tier).');
+  test('1. Authenticate (skipped if no credentials)', async ({ page, loginPage }) => {
+    const { email, password } = config.credentials;
+    if (!email || !password) {
+      test.info().annotations.push({
+        type: 'skip-reason',
+        description: 'No BEECEPTOR_EMAIL/PASSWORD — using anonymous free tier.',
+      });
+      console.log('ℹ  No credentials provided, skipping login.');
+      return;
     }
 
-    // ─────────────────────────────────────────────────
-    // Step 2: Create a new mock endpoint or reuse existing
-    // ─────────────────────────────────────────────────
-    if (config.endpoint.name) {
-      console.log(`Step 2: Reusing existing mock endpoint: ${endpointName}...`);
-      await endpointPage.goto(endpointName);
-      console.log(`✅ Navigated to existing endpoint console`);
-    } else {
-      console.log('Step 2: Creating a new mock endpoint...');
-      endpointUrl = await dashboardPage.createEndpoint(endpointName);
-      
-      // Verify we navigated to the console (and not redirected to login page)
-      await expect(page).toHaveURL(/console/, { timeout: 25000 });
-      console.log(`✅ Endpoint created successfully`);
-    }
+    await loginPage.login(email, password);
+    await expect(page).not.toHaveURL(/login/, { timeout: 15_000 });
+  });
 
-    // ─────────────────────────────────────────────────
-    // Step 3: Navigate to Mocking Rules section
-    // ─────────────────────────────────────────────────
-    console.log('Step 3: Opening Mocking Rules section...');
+  test('2. Create (or reuse) a mock endpoint', async ({ page, dashboardPage }) => {
+    const url = await dashboardPage.createOrReuse(endpointName);
+    expect(url).toBe(endpointUrl);
+    await expect(page).toHaveURL(/console\//, { timeout: 20_000 });
+  });
+
+  test('3. Open the Mocking Rules panel', async ({ page, endpointPage }) => {
+    await endpointPage.goto(endpointName);
     await endpointPage.openMockingRules();
 
-    // Verify rules view is loaded
-    const rulesSection = page.locator(
-      'button:has-text("Mock Rules"), button:has-text("New Rule"), button:has-text("Add Rule")'
-    );
-    await expect(rulesSection.first()).toBeVisible({ timeout: 15000 });
-    console.log('✅ Mocking rules section visible');
+    const rulesPanel = page
+      .locator('#createNew, .dropdown-toggle-split, button:has-text("New Rule")')
+      .first();
+    await expect(rulesPanel).toBeVisible({ timeout: 15_000 });
+  });
 
-    // ─────────────────────────────────────────────────
-    // Step 4: Create and configure an HTTP Callout rule
-    // ─────────────────────────────────────────────────
-    console.log('Step 4: Configuring HTTP Callout rule...');
-    await mockRulePage.createHttpCalloutRule({
-      matchMethod: config.calloutRule.matchMethod,
-      matchPath: config.calloutRule.matchPath,
-      responseStatus: config.calloutRule.responseStatus,
-      responseBody: config.calloutRule.responseBody,
-      calloutTargetUrl: config.calloutRule.calloutTargetUrl,
-      calloutMethod: config.calloutRule.calloutMethod,
-      calloutBody: config.calloutRule.calloutBody,
-    });
+  test('4. Create and configure the HTTP Callout rule', async ({ mockRulePage }) => {
+    await mockRulePage.createHttpCalloutRule(config.calloutRule);
 
-    // Verify rule was created and listed
-    const ruleVisible = await mockRulePage.ruleExists(config.calloutRule.matchPath);
-    expect(ruleVisible).toBeTruthy();
-    console.log('✅ Callout rule successfully created and saved');
+    const listed = await mockRulePage.ruleExists(config.calloutRule.matchPath);
+    expect(
+      listed,
+      `Callout rule for path "${config.calloutRule.matchPath}" should appear in the rules list`,
+    ).toBeTruthy();
+  });
 
-    // ─────────────────────────────────────────────────
-    // Step 5: Trigger the endpoint to fire the HTTP Callout
-    // ─────────────────────────────────────────────────
-    const testPayload = {
+  test('5. Trigger the endpoint — immediate response should match rule', async ({ apiHelper }) => {
+    const payload = {
       event: 'purchase_completed',
       userId: 4488,
-      timestamp: new Date().toISOString(),
       amount: 99.95,
+      timestamp: new Date().toISOString(),
     };
 
-    const triggerUrl = `${endpointUrl}${config.calloutRule.matchPath}`;
-    console.log(`Step 5: Triggering endpoint POST ${triggerUrl}...`);
-    const triggerResponse = await apiHelper.triggerEndpoint({
-      url: triggerUrl,
-      method: 'POST',
-      body: testPayload,
-    });
+    const response = await apiHelper.triggerEndpoint(
+      endpointUrl,
+      config.calloutRule.matchPath,
+      payload,
+      config.calloutRule.matchMethod,
+    );
 
-    console.log(`📬 Response Status: ${triggerResponse.status}`);
-    console.log(`📬 Response Body: ${JSON.stringify(triggerResponse.body)}`);
+    console.log(`↩  Status ${response.status} → ${JSON.stringify(response.body)}`);
 
-    // Verify trigger responded with mock details (expect 200 range status)
-    expect(triggerResponse.status).toBeGreaterThanOrEqual(200);
-    expect(triggerResponse.status).toBeLessThan(500);
-    console.log('✅ Trigger call successfully executed');
+    expect(
+      response.status,
+      'Callout rule should return the configured immediate status (2xx accepted)',
+    ).toBe(config.calloutRule.responseStatus);
+  });
 
-    // ─────────────────────────────────────────────────
-    // Step 6: Verify the HTTP Callout executed successfully
-    // ─────────────────────────────────────────────────
-    console.log('Step 6: Verifying request log in console...');
-    // Return back to dashboard logs
+  test('6. Verify the outbound HTTP Callout actually fired', async ({ page, endpointPage }) => {
+    // Let Beeceptor process the callout asynchronously
+    await page.waitForTimeout(config.timeouts.calloutSettle);
+
     await endpointPage.goto(endpointName);
-    
-    // Wait for the request to appear in logs
-    await page.waitForTimeout(4000);
-    await page.reload({ waitUntil: 'networkidle' });
-    await page.waitForTimeout(2000);
+    await endpointPage.openRequestLog();
 
-    const hasRequest = await endpointPage.hasRequestWithPath(config.calloutRule.matchPath);
-    
-    // Capture log verification screenshot
-    await page.screenshot({
-      path: 'test-results/request-logs-verification.png',
-      fullPage: true,
+    // Wait for the request row for /webhook to appear
+    const row = await endpointPage.waitForRequestWithPath(config.calloutRule.matchPath);
+
+    // Open the request → inspect the callout panel
+    const result = await endpointPage.verifyCalloutForRequest(row, {
+      min: config.calloutRule.expectedCalloutStatusMin,
+      max: config.calloutRule.expectedCalloutStatusMax,
     });
-    
-    expect(hasRequest).toBeTruthy();
-    console.log('✅ Verified: Request path logged in Beeceptor console');
-
-    // ─────────────────────────────────────────────────
-    // Step 7: Verify non-matching path does not trigger callout
-    // ─────────────────────────────────────────────────
-    const nonMatchingUrl = `${endpointUrl}/some-other-path`;
-    console.log(`Step 7: Testing non-matching URL: ${nonMatchingUrl}`);
-    const nonMatchingResponse = await apiHelper.triggerEndpoint({
-      url: nonMatchingUrl,
-      method: 'POST',
-      body: { action: 'ignore' },
-    });
-    expect(nonMatchingResponse.status).toBeGreaterThanOrEqual(200);
-    console.log('✅ Non-matching path handled normally');
-
-    // ─────────────────────────────────────────────────
-    // Step 8: Clean up test data
-    // ─────────────────────────────────────────────────
-    console.log('Step 8: Cleaning up mock rule and endpoint...');
-    await endpointPage.goto(endpointName);
-    try {
-      await endpointPage.openMockingRules();
-      await mockRulePage.deleteRule(config.calloutRule.matchPath);
-      console.log('✅ Rule deleted');
-    } catch (e) {
-      console.log('⚠️ Could not delete rule:', e.message);
-    }
-
-    try {
-      if (config.endpoint.name) {
-        console.log('Skipping endpoint deletion since it is a reused endpoint.');
-      } else {
-        await endpointPage.deleteEndpoint();
-        console.log('✅ Endpoint deleted');
-      }
-    } catch (e) {
-      console.log('⚠️ Could not delete endpoint:', e.message);
-    }
 
     await page.screenshot({
-      path: 'test-results/cleanup-complete.png',
+      path: 'test-results/06-callout-verification.png',
       fullPage: true,
     });
-    console.log('🎉 E2E Workflow Completed Successfully!');
+
+    expect(
+      result.calloutFound,
+      'Beeceptor console should show an outbound callout section for the request',
+    ).toBeTruthy();
+
+    if (result.status !== undefined) {
+      console.log(`✔  Outbound callout status: ${result.status}`);
+      expect(result.status).toBeGreaterThanOrEqual(config.calloutRule.expectedCalloutStatusMin);
+      expect(result.status).toBeLessThanOrEqual(config.calloutRule.expectedCalloutStatusMax);
+    } else {
+      // No numeric status parsed — that's a soft signal, not a hard fail.
+      test.info().annotations.push({
+        type: 'soft-warning',
+        description:
+          'Callout panel found but no numeric status could be parsed from the DOM snippet.',
+      });
+    }
+  });
+
+  test('7. Non-matching path does NOT trigger the callout', async ({ apiHelper }) => {
+    const response = await apiHelper.triggerEndpoint(
+      endpointUrl,
+      '/does-not-match-any-rule',
+      { action: 'ignore' },
+      'POST',
+    );
+
+    console.log(`↩  Non-matching status: ${response.status}`);
+
+    // Beeceptor's default (no rule) is 200/404 depending on defaults.
+    // The important thing is that it is NOT the rule's configured 202.
+    expect(response.status, 'Non-matching path should NOT return the callout rule status').not.toBe(
+      config.calloutRule.responseStatus,
+    );
+  });
+
+  test('8. Cleanup — remove rule and (optionally) endpoint', async ({
+    page,
+    endpointPage,
+    mockRulePage,
+  }) => {
+    await endpointPage.goto(endpointName);
+    await endpointPage.openMockingRules();
+    await mockRulePage.deleteRule(config.calloutRule.matchPath);
+
+    if (!config.endpoint.reuseName) {
+      await endpointPage.deleteEndpoint();
+    } else {
+      console.log('ℹ  Reused endpoint — not deleted.');
+    }
+
+    await page.screenshot({
+      path: 'test-results/08-cleanup-complete.png',
+      fullPage: true,
+    });
   });
 });

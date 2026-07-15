@@ -3,77 +3,66 @@ const { defineConfig, devices } = require('@playwright/test');
 require('dotenv').config();
 
 /**
- * Playwright Configuration for Beeceptor HTTP Callout Automation.
- * @see https://playwright.dev/docs/test-configuration
+ * Playwright configuration for the Beeceptor HTTP Callout E2E suite.
+ *
+ * Design decisions:
+ *   • Sequential tests (workers: 1) — Beeceptor UI state is per-account.
+ *   • Video always on — makes the assignment demo trivial to record.
+ *   • Trace on first retry — cheap CI debugging without ballooning artifacts.
+ *   • Chromium is the default project; Firefox/WebKit are opt-in via
+ *     `PW_ALL_BROWSERS=1` for cross-browser sanity checks.
  */
-module.exports = defineConfig({
-  // Test directory
-  testDir: './tests',
 
-  // Maximum time for the entire test run
-  timeout: 120000,
+const includeAllBrowsers = process.env.PW_ALL_BROWSERS === '1';
 
-  // Maximum time for each expect() assertion
-  expect: {
-    timeout: 15000,
+const projects = [
+  {
+    name: 'chromium',
+    use: {
+      ...devices['Desktop Chrome'],
+      launchOptions: {
+        slowMo: process.env.SLOW_MO ? parseInt(process.env.SLOW_MO, 10) : 0,
+      },
+    },
   },
+];
 
-  // Run tests sequentially (Beeceptor UI state is shared)
+if (includeAllBrowsers) {
+  projects.push(
+    { name: 'firefox', use: { ...devices['Desktop Firefox'] } },
+    { name: 'webkit', use: { ...devices['Desktop Safari'] } },
+  );
+}
+
+module.exports = defineConfig({
+  testDir: './tests',
+  timeout: 180_000,
+  expect: { timeout: 15_000 },
+
   fullyParallel: false,
-
-  // Fail the build on CI if you accidentally left test.only in the source code
+  workers: 1,
+  retries: process.env.CI ? 2 : 1,
   forbidOnly: !!process.env.CI,
 
-  // Retry failed tests once
-  retries: process.env.CI ? 2 : 1,
-
-  // Single worker to avoid Beeceptor session conflicts
-  workers: 1,
-
-  // Reporter configuration
   reporter: [
     ['html', { open: 'never' }],
     ['list'],
+    ['json', { outputFile: 'test-results/results.json' }],
   ],
 
-  // Shared settings for all projects
   use: {
-    // Base URL
     baseURL: 'https://beeceptor.com',
-
-    // Browser viewport
-    viewport: { width: 1280, height: 720 },
-
-    // Record video for every test (useful for demo)
+    viewport: { width: 1440, height: 800 },
     video: 'on',
-
-    // Capture screenshot on failure
-    screenshot: 'on',
-
-    // Collect trace on first retry
+    screenshot: 'only-on-failure',
     trace: 'on-first-retry',
-
-    // Navigation timeout
-    navigationTimeout: 30000,
-
-    // Action timeout
-    actionTimeout: 15000,
-
-    // Ignore HTTPS errors
+    navigationTimeout: 30_000,
+    actionTimeout: 15_000,
     ignoreHTTPSErrors: true,
+    launchOptions: {
+      args: ['--disable-blink-features=AutomationControlled'],
+    },
   },
 
-  // Browser projects
-  projects: [
-    {
-      name: 'chromium',
-      use: {
-        ...devices['Desktop Chrome'],
-        // Slow down actions for visual clarity during recording
-        launchOptions: {
-          slowMo: process.env.SLOW_MO ? parseInt(process.env.SLOW_MO) : 0,
-        },
-      },
-    },
-  ],
+  projects,
 });

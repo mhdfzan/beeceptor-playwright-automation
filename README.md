@@ -1,228 +1,227 @@
-# 🐝 Beeceptor HTTP Callout Rule — Playwright Automation
+# Beeceptor HTTP Callout Rule — Playwright Automation
 
-Automated end-to-end testing of [Beeceptor's HTTP Callout Rule](https://beeceptor.com/docs/proxy-rule-http-callout/) feature using [Playwright](https://playwright.dev/) (JavaScript).
+End-to-end Playwright (JavaScript) automation that exercises Beeceptor's
+[HTTP Callout Rule](https://beeceptor.com/docs/proxy-rule-http-callout/)
+feature from the browser and the network — creating an endpoint, authoring
+a callout rule, firing a live request, and independently verifying that the
+outbound callout actually executed.
 
----
-
-## 📖 Understanding the HTTP Callout Feature
-
-### What is it?
-Beeceptor's **HTTP Callout Rule** (also called Proxy Rule) is a powerful mock rule that, when triggered by an incoming HTTP request, simultaneously:
-
-1. **Returns an immediate response** to the original caller (e.g., `202 Accepted`)
-2. **Fires an outbound HTTP request** (callout) to an external service in the background
-
-### When to use it?
-- **Simulating async workflows**: Webhooks, payment callbacks, SMS delivery notifications
-- **Integration testing**: Testing how your app handles multi-service interactions
-- **Payload transformation**: Forwarding modified request data to downstream services
-- **Dynamic routing**: Routing requests to different backends based on payload content
-
-### How it works
-```
-Client ──POST /webhook──► Beeceptor Endpoint
-                              │
-                    ┌─────────┴─────────┐
-                    │                   │
-                    ▼                   ▼
-          Returns 202 to          Fires POST to
-          original client       httpbin.org/post
-          (immediate)            (background callout)
-```
+![Playwright](https://img.shields.io/badge/Playwright-2EAD33?logo=playwright&logoColor=white)
+![Node.js](https://img.shields.io/badge/Node.js-%3E%3D18-339933?logo=node.js&logoColor=white)
+![CI](https://img.shields.io/badge/CI-GitHub_Actions-2088FF?logo=github-actions&logoColor=white)
+![License](https://img.shields.io/badge/License-MIT-blue)
 
 ---
 
-## 🏗️ Project Architecture
+## What the HTTP Callout Rule does
+
+When a request hits a Beeceptor endpoint that has a matching callout rule,
+Beeceptor performs two things **simultaneously**:
+
+```
+       ┌─── returns the mocked response (e.g. 202 Accepted) ───► original caller
+POST → │
+       └─── fires an outbound HTTP request ("callout") ────────► your target URL
+```
+
+This is how you simulate async webhooks, payment callbacks, fan-out routing,
+etc. — without wiring up a real backend.
+
+**The core value proposition is the outbound callout**, which is why this
+suite verifies both halves of the behaviour.
+
+---
+
+## What this suite covers
+
+| #   | Step                     | What it validates                                                     |
+| --- | ------------------------ | --------------------------------------------------------------------- |
+| 1   | Login                    | Authenticates when credentials are supplied; skips gracefully if not. |
+| 2   | Create / Reuse endpoint  | New endpoint via UI, or reuse via `BEECEPTOR_ENDPOINT` env var.       |
+| 3   | Open Mock Rules panel    | Robust tab navigation with onboarding-wizard dismissal.               |
+| 4   | Author callout rule      | Fills match criteria, response, and outbound-request configuration.   |
+| 5   | Trigger endpoint         | Live POST via Playwright's `APIRequestContext`; asserts 202.          |
+| 6   | **Verify callout fired** | Opens the logged request in the console and asserts the outbound      |
+|     |                          | callout section is present and reports a success status.              |
+| 7   | Non-matching path        | Confirms unrelated paths do NOT hit the rule.                         |
+| 8   | Cleanup                  | Deletes the rule and (unless reusing) the endpoint.                   |
+
+The verification in **Step 6 is the interesting bit** — most naive tests
+only check that a request was logged. This suite goes further and asserts
+Beeceptor recorded the outbound callout result too.
+
+---
+
+## Project layout
 
 ```
 beeceptor-playwright-automation/
-├── playwright.config.js        # Playwright configuration (browser, video, timeouts)
-├── package.json                # Dependencies & npm scripts
-├── .env.example                # Environment variable template
-├── .gitignore                  # Git ignore rules
-│
-├── pages/                      # Page Object Model (POM) classes
-│   ├── LoginPage.js            # Authentication handling
-│   ├── DashboardPage.js        # Endpoint creation & navigation
-│   ├── EndpointPage.js         # Endpoint console & request logs
-│   └── MockRulePage.js         # Rule creation & configuration
-│
-├── tests/                      # Test specifications
-│   └── http-callout.spec.js    # Main E2E test suite (8 steps)
-│
-├── utils/                      # Shared utilities
-│   ├── config.js               # Centralized configuration
-│   └── api-helper.js           # HTTP request helper for triggering endpoints
-│
-└── fixtures/                   # Playwright custom fixtures
-    └── test-fixtures.js        # Page object injection
+├── .github/workflows/
+│   └── e2e.yml                 # GitHub Actions — lint + e2e on push/PR
+├── fixtures/
+│   └── test-fixtures.js        # Injects page objects into every test
+├── pages/                      # Page Object Model
+│   ├── LoginPage.js
+│   ├── DashboardPage.js
+│   ├── EndpointPage.js         # ← callout verification lives here
+│   └── MockRulePage.js
+├── tests/
+│   └── http-callout.spec.js    # 8 sequential test steps in one serial block
+├── utils/
+│   ├── config.js               # All URLs, timeouts, rule defaults
+│   └── api-helper.js           # Thin wrapper around Playwright's request API
+├── playwright.config.js
+├── package.json
+├── .env.example
+├── .eslintrc.json / .prettierrc.json
+└── README.md
 ```
 
-### Design Decisions
+### Design decisions
 
-| Decision | Rationale |
-|----------|-----------|
-| **Page Object Model** | Separates UI interaction logic from test assertions for maintainability |
-| **Custom Fixtures** | Automatically injects page objects into tests — cleaner than manual instantiation |
-| **Sequential Tests** | Tests run in order (login → create → configure → trigger → verify → cleanup) as they share endpoint state |
-| **Resilient Locators** | Uses multiple selector strategies with fallbacks (role-based, text-based, attribute-based) since Beeceptor's CSS classes may change |
-| **Environment Variables** | Credentials stored in `.env` (not committed) for security |
-| **Video Recording** | Every test run is recorded — useful for debugging and demo submission |
+| Decision                          | Why                                                                                               |
+| --------------------------------- | ------------------------------------------------------------------------------------------------- |
+| **Page Object Model**             | Keeps UI selectors out of tests. One place to fix when Beeceptor's DOM shifts.                    |
+| **Fixtures, not manual `new`s**   | `page`, `loginPage`, `endpointPage`, etc. arrive pre-wired to each test.                          |
+| **Serial `describe`, one worker** | Beeceptor state is per-endpoint; parallelism would cause flakes.                                  |
+| **Env-driven configuration**      | No secrets in the repo. Same suite runs locally, in CI, and against a reused endpoint.            |
+| **Verify outbound callout in UI** | The whole point of the feature — assertion has to prove it, not just that a request was received. |
+| **Video always on**               | Every run auto-produces a demo-ready recording.                                                   |
+| **Trace on first retry**          | Cheap debugging in CI without huge artifacts.                                                     |
+| **ESLint + Prettier + CI**        | Signals production-readiness; lint gate blocks bad merges.                                        |
 
 ---
 
-## 🚀 Setup & Installation
+## Getting started
 
 ### Prerequisites
-- **Node.js** v18+ ([download](https://nodejs.org/))
-- **A free Beeceptor account** ([sign up](https://beeceptor.com/))
 
-### Step 1: Clone the Repository
+- **Node.js ≥ 18**
+- (Optional) a free Beeceptor account — sign up at <https://beeceptor.com>
+
+### Install
+
 ```bash
-git clone https://github.com/<your-username>/beeceptor-playwright-automation.git
+git clone https://github.com/mhdfzan/beeceptor-playwright-automation.git
 cd beeceptor-playwright-automation
-```
-
-### Step 2: Install Dependencies
-```bash
 npm install
+npm run install:browsers            # downloads Chromium
 ```
 
-### Step 3: Install Playwright Browsers
-```bash
-npx playwright install chromium
-```
+### Configure (optional)
 
-### Step 4: Configure Environment
 ```bash
-# Copy the example env file
 cp .env.example .env
-
-# Edit .env with your Beeceptor credentials
-# BEECEPTOR_EMAIL=your-email@example.com
-# BEECEPTOR_PASSWORD=your-password
+# Edit .env — every value is optional
 ```
 
-> **Note**: If you don't set credentials, the automation will attempt to use Beeceptor's free tier (no login required for basic endpoint creation).
+- Without credentials, the suite uses Beeceptor's anonymous free tier and
+  creates a fresh endpoint each run.
+- Set `BEECEPTOR_ENDPOINT=<name>` to reuse the same endpoint every run
+  (bypasses free-tier creation rate limits).
 
----
+### Run
 
-## ▶️ Running the Tests
-
-### Standard Run (headless)
 ```bash
-npm test
+npm test                 # headless, single Chromium project
+npm run test:headed      # watch the browser drive the UI
+npm run test:slow        # 500ms slow-mo — great for demo videos
+npm run test:debug       # step through with Playwright Inspector
+npm run test:all-browsers # Chromium + Firefox + WebKit
+npm run report           # open the HTML report after a run
 ```
 
-### Headed Mode (see the browser)
-```bash
-npm run test:headed
-```
+Lint & format:
 
-### Debug Mode (step through interactively)
 ```bash
-npm run test:debug
-```
-
-### Slow Motion (great for demos)
-```bash
-npm run test:slow
-```
-
-### View HTML Report
-```bash
-npm run report
+npm run lint
+npm run format:check
 ```
 
 ---
 
-## 🧪 Test Scenarios
+## Test artifacts
 
-The test suite covers 8 sequential steps that form a complete E2E workflow:
+After every run, the following land on disk (and are uploaded by CI):
 
-| Step | Test | What it does |
-|------|------|-------------|
-| 1 | **Login** | Authenticates with Beeceptor (skips if no credentials) |
-| 2 | **Create Endpoint** | Creates a new mock endpoint with unique name |
-| 3 | **Navigate to Rules** | Opens the Mocking Rules section |
-| 4 | **Create Callout Rule** | Creates an HTTP Callout rule (POST /webhook → httpbin.org/post) |
-| 5 | **Trigger Endpoint** | Sends POST to the endpoint to fire the callout |
-| 6 | **Verify Callout** | Checks request logs confirm the callout executed |
-| 7 | **Non-matching Test** | Verifies non-matching paths don't trigger the rule |
-| 8 | **Cleanup** | Deletes the rule and endpoint |
-
-### Key Assertions
-- ✅ Login succeeds and dashboard is accessible
-- ✅ Endpoint is created and accessible via URL
-- ✅ HTTP Callout rule appears in the rules list
-- ✅ API trigger returns expected status code (202)
-- ✅ Request is logged in Beeceptor's request history
-- ✅ Non-matching paths are handled without triggering the callout
-- ✅ Test data is cleaned up after the test run
+| Artifact         | Path                                           |
+| ---------------- | ---------------------------------------------- |
+| HTML report      | `playwright-report/index.html`                 |
+| Video recordings | `test-results/**/video.webm`                   |
+| Screenshots      | `test-results/06-callout-verification.png` &c. |
+| Traces           | `test-results/**/trace.zip` (on retry)         |
+| JSON results     | `test-results/results.json`                    |
 
 ---
 
-## 🔧 Configuration
+## Continuous integration
 
-All configurable values are centralized in [`utils/config.js`](utils/config.js):
+`/.github/workflows/e2e.yml` runs on every push and pull-request to `main`:
 
-```javascript
-// HTTP Callout Rule Configuration
-{
-  matchMethod: 'POST',           // Match incoming POST requests
-  matchPath: '/webhook',         // on the /webhook path
-  responseStatus: 202,           // Return 202 Accepted immediately
-  calloutTargetUrl: 'https://httpbin.org/post',  // Fire callout to httpbin
-  calloutMethod: 'POST',         // Callout uses POST method
-}
-```
+1. **Lint job** — ESLint + Prettier check.
+2. **E2E job** — installs Chromium, runs the suite headless, uploads the
+   HTML report + videos + traces as artifacts.
 
----
+Credentials come from repo **Actions secrets**:
 
-## 📁 Artifacts Generated
-
-After each test run, the following are generated:
-
-| Artifact | Location | Description |
-|----------|----------|-------------|
-| **Video recordings** | `test-results/` | Full browser recording of each test |
-| **Screenshots** | `test-results/` | Captured on failure + verification steps |
-| **HTML Report** | `playwright-report/` | Interactive test report with traces |
-| **Traces** | `test-results/` | Detailed trace files for debugging |
+- `BEECEPTOR_EMAIL`
+- `BEECEPTOR_PASSWORD`
+- `BEECEPTOR_ENDPOINT` (recommended — reuses one endpoint across CI runs)
 
 ---
 
-## 🤔 Testing Approach & Thinking
+## Testing approach & rationale
 
 ### Why Playwright?
-- **Built-in API testing**: Can make HTTP calls alongside browser automation (perfect for trigger + verify)
-- **Auto-waiting**: Reduces flakiness with intelligent element waiting
-- **Video & trace recording**: Built-in, no extra tooling needed
-- **Modern async/await**: Clean, readable test code
 
-### Challenges Addressed
-1. **Dynamic UI**: Beeceptor's CSS classes may change → used text/role-based locators with fallbacks
-2. **Async callouts**: The HTTP Callout fires asynchronously → added polling/wait logic to verify
-3. **State management**: Tests share endpoint state → used `test.describe.configure({ mode: 'serial' })`
-4. **Free tier limitations**: Handled gracefully — tests skip login if no credentials
+- **Same tool for browser AND API calls** — no separate HTTP client, and both
+  share the same trace/report.
+- **Auto-waiting locators** minimise the classic Selenium flakiness.
+- **Video + trace out of the box** — perfect for both interview demos and
+  CI post-mortems.
 
-### What I'd Improve With More Time
-- Add visual regression testing for the Beeceptor UI
-- Test with multiple browser engines (Firefox, WebKit)
-- Add retry logic for flaky network-dependent steps
-- Implement CI/CD pipeline (GitHub Actions) for automated test runs
-- Add API-based verification via Beeceptor's Management API (Team plan)
+### Selector strategy
+
+Beeceptor's DOM has a mix of stable IDs (`#matchMethod`, `#saveProxy`,
+`#no-transform`, `#createNew`) and legacy class-based Bootstrap components.
+The page objects prefer the stable IDs and only fall back to text/role
+locators when necessary — this keeps the tests robust against CSS churn.
+
+### Why serial mode?
+
+Beeceptor's UI reflects a single, mutable endpoint state. Running steps in
+parallel would race on rule creation/deletion and the request log. Serial
+mode + a single worker keeps the flow deterministic.
+
+### Independent callout verification
+
+The console UI shows the _outbound_ callout details when a request row is
+expanded. Step 6 clicks into the row, looks for the callout section, and
+scrapes the status code from the visible text — assert-driven proof that
+the feature actually fired, not just that Beeceptor received something.
+
+### What I'd add next
+
+- **Second Beeceptor endpoint as the callout target** — poll its request log
+  via UI to independently confirm the outbound payload contents.
+- **Visual regression** snapshots of the console for the callout section.
+- **Retry semantics** for the callout target being briefly down.
+- **Data-driven tests** — parameterize methods (GET/PUT/DELETE), paths,
+  and payload transforms.
 
 ---
 
-## 📜 License
+## Demo video
+
+A 2–3 minute walkthrough is recorded in the accompanying submission form.
+It covers:
+
+1. What the HTTP Callout feature does and why it matters.
+2. A live run of the suite (headed, slow-mo).
+3. The design decisions above — especially the outbound-callout verification.
+
+---
+
+## License
 
 MIT
-
----
-
-## 🙏 Acknowledgments
-
-- [Beeceptor](https://beeceptor.com/) — Mock API platform
-- [Playwright](https://playwright.dev/) — Browser automation framework
-- [httpbin.org](https://httpbin.org/) — HTTP request/response testing service

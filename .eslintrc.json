@@ -1,0 +1,24 @@
+{
+  "root": true,
+  "env": {
+    "node": true,
+    "browser": true,
+    "es2022": true
+  },
+  "parserOptions": {
+    "ecmaVersion": 2022,
+    "sourceType": "script"
+  },
+  "extends": ["eslint:recommended", "plugin:playwright/recommended", "prettier"],
+  "rules": {
+    "no-console": "off",
+    "no-empty": ["error", { "allowEmptyCatch": true }],
+    "no-unused-vars": ["warn", { "argsIgnorePattern": "^_" }],
+    "playwright/no-conditional-in-test": "off",
+    "playwright/no-skipped-test": "off",
+    "playwright/expect-expect": "off",
+    "playwright/no-networkidle": "off",
+    "playwright/no-wait-for-timeout": "off",
+    "playwright/no-conditional-expect": "off"
+  }
+}

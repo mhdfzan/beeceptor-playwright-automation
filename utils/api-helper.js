@@ -1,123 +1,68 @@
 // @ts-check
 
 /**
- * API Helper for triggering Beeceptor endpoints and verifying responses.
- * Uses Playwright's built-in request context for HTTP calls.
+ * Lightweight HTTP client wrapper around Playwright's APIRequestContext.
+ *
+ * Used to trigger Beeceptor endpoints from tests without spinning up a
+ * separate browser context — same request infrastructure, cleaner API.
  */
 class ApiHelper {
   /**
-   * @param {import('@playwright/test').APIRequestContext} request - Playwright request context
+   * @param {import('@playwright/test').APIRequestContext} request
    */
   constructor(request) {
     this.request = request;
   }
 
   /**
-   * Trigger a Beeceptor endpoint with an HTTP request.
+   * Send an HTTP request to any URL and return a normalized response.
+   *
    * @param {Object} options
-   * @param {string} options.url - Full URL to send the request to
-   * @param {string} [options.method='POST'] - HTTP method
-   * @param {Object|string} [options.body] - Request body
-   * @param {Object} [options.headers] - Additional headers
-   * @returns {Promise<{status: number, body: any, headers: Object}>}
+   * @param {string} options.url
+   * @param {string} [options.method='POST']
+   * @param {Object|string|null} [options.body]
+   * @param {Object} [options.headers]
+   * @returns {Promise<{status: number, ok: boolean, body: any, headers: Object}>}
    */
-  async triggerEndpoint({ url, method = 'POST', body = null, headers = {} }) {
-    const requestOptions = {
-      headers: {
-        'Content-Type': 'application/json',
-        ...headers,
-      },
+  async send({ url, method = 'POST', body = null, headers = {} }) {
+    const options = {
+      headers: { 'Content-Type': 'application/json', ...headers },
     };
-
-    if (body) {
-      requestOptions.data = typeof body === 'string' ? body : JSON.stringify(body);
+    if (body !== null && body !== undefined) {
+      options.data = typeof body === 'string' ? body : JSON.stringify(body);
     }
 
-    let response;
-    switch (method.toUpperCase()) {
-      case 'GET':
-        response = await this.request.get(url, requestOptions);
-        break;
-      case 'POST':
-        response = await this.request.post(url, requestOptions);
-        break;
-      case 'PUT':
-        response = await this.request.put(url, requestOptions);
-        break;
-      case 'PATCH':
-        response = await this.request.patch(url, requestOptions);
-        break;
-      case 'DELETE':
-        response = await this.request.delete(url, requestOptions);
-        break;
-      default:
-        response = await this.request.post(url, requestOptions);
-    }
+    const response = await this.request.fetch(url, {
+      method: method.toUpperCase(),
+      ...options,
+    });
 
-    let responseBody;
+    let parsedBody;
     try {
-      responseBody = await response.json();
+      parsedBody = await response.json();
     } catch {
-      responseBody = await response.text();
+      parsedBody = await response.text();
     }
 
     return {
       status: response.status(),
-      body: responseBody,
+      ok: response.ok(),
+      body: parsedBody,
       headers: response.headers(),
     };
   }
 
   /**
-   * Send a POST request to trigger a webhook-style endpoint.
-   * @param {string} endpointUrl - The Beeceptor endpoint base URL
-   * @param {string} path - The path to trigger (e.g., '/webhook')
-   * @param {Object} payload - The JSON payload to send
-   * @returns {Promise<{status: number, body: any, headers: Object}>}
+   * Convenience — trigger a Beeceptor endpoint at `${endpointUrl}${path}`.
+   *
+   * @param {string} endpointUrl
+   * @param {string} path
+   * @param {Object} payload
+   * @param {string} [method='POST']
    */
-  async triggerWebhook(endpointUrl, path, payload = {}) {
+  async triggerEndpoint(endpointUrl, path, payload = {}, method = 'POST') {
     const fullUrl = `${endpointUrl}${path}`;
-    console.log(`Triggering webhook: POST ${fullUrl}`);
-    return await this.triggerEndpoint({
-      url: fullUrl,
-      method: 'POST',
-      body: payload,
-    });
-  }
-
-  /**
-   * Verify the response matches expected values.
-   * @param {Object} response - The response from triggerEndpoint
-   * @param {Object} expected
-   * @param {number} [expected.status] - Expected status code
-   * @param {Object} [expected.bodyContains] - Key-value pairs the body should contain
-   * @returns {Object} Verification results
-   */
-  verifyResponse(response, expected = {}) {
-    const results = {
-      statusMatch: true,
-      bodyMatch: true,
-      details: [],
-    };
-
-    if (expected.status !== undefined) {
-      results.statusMatch = response.status === expected.status;
-      results.details.push(
-        `Status: expected ${expected.status}, got ${response.status} - ${results.statusMatch ? 'PASS' : 'FAIL'}`
-      );
-    }
-
-    if (expected.bodyContains && typeof response.body === 'object') {
-      for (const [key, value] of Object.entries(expected.bodyContains)) {
-        const match = response.body[key] === value;
-        if (!match) results.bodyMatch = false;
-        results.details.push(
-          `Body.${key}: expected "${value}", got "${response.body[key]}" - ${match ? 'PASS' : 'FAIL'}`
-        );
-      }
-    }
-
-    return results;
+    return this.send({ url: fullUrl, method, body: payload });
   }
 }
 
