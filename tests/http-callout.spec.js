@@ -88,9 +88,17 @@ test.describe('Beeceptor HTTP Callout Rule — E2E', () => {
     await expect(rulesPanel).toBeVisible({ timeout: 15_000 });
   });
 
-  test('4. Create and configure the HTTP Callout rule', async ({ endpointPage, mockRulePage }) => {
+  test('4. Create and configure the HTTP Callout rule', async ({
+    page,
+    endpointPage,
+    mockRulePage,
+  }) => {
     await endpointPage.openMockingRules();
     await mockRulePage.createHttpCalloutRule(config.calloutRule);
+
+    // Reload to make sure we see the persisted rules list.
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await endpointPage.openMockingRules();
 
     const listed = await mockRulePage.ruleExists(config.calloutRule.matchPath);
     expect(

@@ -66,34 +66,46 @@ class MockRulePage {
    */
   async setMatchCriteria({ method, path }) {
     // Trigger-method select. First #matchMethod on the page.
-    // Bootstrap's form-select may render the native <select> visually hidden;
-    // Playwright's selectOption() still works on hidden selects.
     const triggerMethod = this.page.locator('#matchMethod, select[name*="matchMethod" i]').first();
     await triggerMethod.waitFor({ state: 'attached', timeout: 10_000 });
     await triggerMethod.selectOption({ label: method }).catch(async () => {
-      // Fallback if labels don't match exactly — try value
-      await triggerMethod.selectOption(method);
+      await triggerMethod.selectOption(method).catch(() => {});
     });
 
     // Path input — Beeceptor labels this "Match value/expression".
-    const pathInput = this.page
-      .locator('input')
-      .filter({
-        hasNot: this.page.locator('[type="hidden"], [type="checkbox"], [type="radio"]'),
-      })
-      .filter({ has: this.page.locator('xpath=preceding::label[contains(., "Match")][1]') })
-      .first();
+    // Try common IDs first, then broad attribute/placeholder matches.
+    const pathSelectors = [
+      '#matchPath',
+      '#matchValue',
+      '#matchExpression',
+      'input[name="matchPath" i]',
+      'input[name="matchValue" i]',
+      'input[name*="match" i]',
+      'input[placeholder*="path" i]',
+      'input[placeholder*="pattern" i]',
+      'input[placeholder*="expression" i]',
+      'input[placeholder*="/" i]',
+    ].join(', ');
 
+    const pathInput = this.page.locator(pathSelectors).first();
     if (await pathInput.count()) {
-      await pathInput.fill(path);
-    } else {
-      // Broad fallback
-      const alt = this.page
-        .locator(
-          'input[name*="match" i], input[name*="path" i], input[placeholder*="path" i], #matchPath',
-        )
-        .first();
-      await alt.fill(path).catch(() => {});
+      await pathInput.fill(path).catch(() => {});
+    }
+
+    // Verify the value stuck; if not, try a broader approach — the first
+    // text-like input near a label containing "Match".
+    if (await pathInput.count()) {
+      const filled = await pathInput.inputValue().catch(() => '');
+      if (filled !== path) {
+        const nearMatchLabel = this.page
+          .locator('label')
+          .filter({ hasText: /Match/i })
+          .first()
+          .locator('xpath=following::input[1]');
+        if (await nearMatchLabel.count()) {
+          await nearMatchLabel.fill(path).catch(() => {});
+        }
+      }
     }
   }
 
@@ -160,13 +172,41 @@ class MockRulePage {
 
   /** Persist the rule. Beeceptor callout rules use #saveProxy. */
   async save() {
-    const save = this.page
-      .locator('#saveProxy, #saveCrud, button:has-text("Save"):visible')
-      .first();
-    await save.waitFor({ state: 'visible', timeout: 5_000 });
-    await save.click({ force: true });
+    // Diagnostic screenshot — captures the filled form right before save.
+    await this.page
+      .screenshot({ path: 'test-results/pre-save-form.png', fullPage: true })
+      .catch(() => {});
+
+    // Prefer the specific #saveProxy id used by callout rules.
+    const saveById = this.page.locator('#saveProxy').first();
+    if (await saveById.count().catch(() => 0)) {
+      await saveById.scrollIntoViewIfNeeded().catch(() => {});
+      await saveById.click({ force: true });
+    } else {
+      // Otherwise find the Save button inside the last-opened modal/dialog.
+      const modalSave = this.page
+        .locator('.modal, [role="dialog"], .modal-dialog, .offcanvas')
+        .last()
+        .locator('button')
+        .filter({ hasText: /^\s*Save\s*$/i })
+        .first();
+
+      if (await modalSave.count().catch(() => 0)) {
+        await modalSave.scrollIntoViewIfNeeded().catch(() => {});
+        await modalSave.click({ force: true });
+      } else {
+        // Last resort — the last visible Save button on the page.
+        const anySave = this.page.locator('button:has-text("Save"):visible').last();
+        await anySave.scrollIntoViewIfNeeded().catch(() => {});
+        await anySave.click({ force: true });
+      }
+    }
+
     await this.page.waitForLoadState('networkidle');
-    await this.page.waitForTimeout(1_500);
+    await this.page.waitForTimeout(2_000);
+    await this.page
+      .screenshot({ path: 'test-results/post-save-form.png', fullPage: true })
+      .catch(() => {});
   }
 
   /** Complete flow. */
