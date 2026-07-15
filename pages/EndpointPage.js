@@ -45,25 +45,55 @@ class EndpointPage {
   /** Switch to the "Mocking Rules" tab in the endpoint console. */
   async openMockingRules() {
     await this.dismissOnboardingIfPresent();
-    const tab = this.page
-      .locator('a, button, div')
-      .filter({ hasText: /^Mock(ing)? Rules$/i })
-      .first();
-    await tab.click();
     await this.page.waitForLoadState('networkidle');
+
+    // Try progressively more permissive locators — Beeceptor's tab element
+    // varies (link vs button vs span-inside-li) across page states.
+    const candidates = [
+      this.page.getByRole('tab', { name: /Mock(ing)?\s*Rules/i }),
+      this.page.getByRole('link', { name: /Mock(ing)?\s*Rules/i }),
+      this.page.locator('a, button, li, span').filter({ hasText: /Mock(ing)?\s*Rules/i }),
+      this.page.locator('a[href*="rules" i], a[href*="mock" i]'),
+    ];
+
+    for (const candidate of candidates) {
+      const first = candidate.first();
+      if (await first.isVisible({ timeout: 2_000 }).catch(() => false)) {
+        await first.scrollIntoViewIfNeeded().catch(() => {});
+        await first.click({ force: true });
+        await this.page.waitForLoadState('networkidle');
+        return;
+      }
+    }
+
+    throw new Error(
+      'Could not locate the "Mocking Rules" tab on the endpoint console. ' +
+        'Beeceptor UI may have changed — inspect the failure screenshot.',
+    );
   }
 
   /** Switch back to the "Requests" (log) tab. */
   async openRequestLog() {
     await this.dismissOnboardingIfPresent();
-    const tab = this.page
-      .locator('a, button, div')
-      .filter({ hasText: /^Requests?$|Endpoint Console|Live Requests/i })
-      .first();
-    if (await tab.isVisible({ timeout: 2_000 }).catch(() => false)) {
-      await tab.click();
+
+    const candidates = [
+      this.page.getByRole('tab', { name: /Requests?|Endpoint Console|Live Requests/i }),
+      this.page.getByRole('link', { name: /Requests?|Endpoint Console|Live Requests/i }),
+      this.page.locator('a, button, li, span').filter({
+        hasText: /^(Requests?|Endpoint Console|Live Requests)$/i,
+      }),
+      this.page.locator('a[href*="requests" i]'),
+    ];
+
+    for (const candidate of candidates) {
+      const first = candidate.first();
+      if (await first.isVisible({ timeout: 2_000 }).catch(() => false)) {
+        await first.click({ force: true }).catch(() => {});
+        await this.page.waitForLoadState('networkidle');
+        return;
+      }
     }
-    await this.page.waitForLoadState('networkidle');
+    // Not fatal — some layouts default to the requests view already
   }
 
   /**
