@@ -10,6 +10,22 @@ require('dotenv').config();
 
 const uniqueSuffix = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 
+/**
+ * Normalize a Beeceptor endpoint identifier so users can paste either
+ *   "my-endpoint"                          →  "my-endpoint"
+ *   "https://my-endpoint.free.beeceptor.com" →  "my-endpoint"
+ *   "my-endpoint.free.beeceptor.com/"      →  "my-endpoint"
+ * without breaking URL construction.
+ */
+const normalizeEndpointName = (raw) => {
+  if (!raw) return '';
+  return raw
+    .trim()
+    .replace(/^https?:\/\//i, '')
+    .replace(/\.free\.beeceptor\.com.*$/i, '')
+    .replace(/\/.*$/, '');
+};
+
 const config = {
   urls: {
     home: 'https://beeceptor.com',
@@ -25,9 +41,9 @@ const config = {
 
   endpoint: {
     /** If provided, reuse this endpoint (avoids Beeceptor free-tier rate limits). */
-    reuseName: process.env.BEECEPTOR_ENDPOINT || '',
+    reuseName: normalizeEndpointName(process.env.BEECEPTOR_ENDPOINT),
     /** Optional — a second Beeceptor endpoint that will act as the callout target. */
-    calloutTargetName: process.env.CALLOUT_TARGET_ENDPOINT || '',
+    calloutTargetName: normalizeEndpointName(process.env.CALLOUT_TARGET_ENDPOINT),
     /** Generate a unique endpoint name (fresh run) or return the reused one. */
     resolveName() {
       return this.reuseName || `pw-cal-${uniqueSuffix()}`;
@@ -62,8 +78,9 @@ const config = {
      */
     get calloutTargetUrl() {
       if (process.env.CALLOUT_TARGET_URL) return process.env.CALLOUT_TARGET_URL;
-      if (process.env.CALLOUT_TARGET_ENDPOINT) {
-        return `https://${process.env.CALLOUT_TARGET_ENDPOINT}.free.beeceptor.com/callout-received`;
+      const normalizedTarget = normalizeEndpointName(process.env.CALLOUT_TARGET_ENDPOINT);
+      if (normalizedTarget) {
+        return `https://${normalizedTarget}.free.beeceptor.com/callout-received`;
       }
       return 'https://httpbin.org/post';
     },
