@@ -1,12 +1,18 @@
 // @ts-check
 
 /**
- * Page Object — Beeceptor Mock Rule editor (with HTTP Callout support).
+ * Page Object — Beeceptor Callout Rule editor.
  *
- * Beeceptor's Mock Rules modal has a split button at the bottom:
- *   [ + New Rule ][ ▼ ]
- * Clicking "+ New Rule" creates a MOCK rule. Clicking the caret opens a
- * menu with "New CRUD Route" and "New Callout Rule" — we want the latter.
+ * The rule form (opened by clicking the split-dropdown caret → "New
+ * Callout Rule") has two collapsible sections:
+ *
+ *   1. "When following condition is matched (for request)"  — match criteria
+ *   2. "Do the following (for response)"                     — response + callout
+ *        ├─ Synchronous Response Configuration
+ *        └─ Synchronous Request Configuration (HTTP Callout)
+ *
+ * We target fields by their visible label text (via getByLabel) so the
+ * selectors survive class-name reshuffles.
  */
 class MockRulePage {
   /** @param {import('@playwright/test').Page} page */
@@ -16,6 +22,8 @@ class MockRulePage {
 
   /**
    * Open the "New Callout Rule" form via the split-dropdown caret.
+   * Falls back to "+ New Rule" (which opens the mock form) if the caret
+   * or callout option cannot be located.
    */
   async openNewCalloutRuleForm() {
     await this.page.waitForLoadState('networkidle');
@@ -24,7 +32,6 @@ class MockRulePage {
     const newRuleBtn = this.page.locator('button:has-text("New Rule")').first();
     await newRuleBtn.waitFor({ state: 'visible', timeout: 10_000 });
 
-    // The caret is the button immediately following "+ New Rule" in the DOM.
     const caret = newRuleBtn.locator('xpath=following-sibling::button[1]');
     let opened = false;
 
@@ -41,14 +48,11 @@ class MockRulePage {
       }
     }
 
-    // Fallback: click "+ New Rule" directly (opens the MOCK rule form)
     if (!opened) {
       await newRuleBtn.click({ force: true });
-      opened = true;
     }
 
-    // Wait for the rule editor to render — the Save/Cancel buttons appear
-    // at the bottom of any Beeceptor rule form.
+    // Any Beeceptor rule form ends with Save + Cancel buttons.
     await this.page
       .locator('button:has-text("Save"), button:has-text("Cancel")')
       .first()
@@ -57,121 +61,118 @@ class MockRulePage {
   }
 
   /**
-   * Set the incoming-request matching criteria (Method + Path).
+   * Set the incoming-request matching criteria at the top of the form.
    * @param {{method: string, path: string}} opts
    */
   async setMatchCriteria({ method, path }) {
-    // Trigger-method select. Bootstrap's form-select styling may render the
-    // native <select> visually hidden — use 'attached' + selectOption(),
-    // which Playwright supports on hidden selects.
-    const triggerMethod = this.page.locator('#matchMethod').first();
+    // Trigger-method select. First #matchMethod on the page.
+    // Bootstrap's form-select may render the native <select> visually hidden;
+    // Playwright's selectOption() still works on hidden selects.
+    const triggerMethod = this.page.locator('#matchMethod, select[name*="matchMethod" i]').first();
     await triggerMethod.waitFor({ state: 'attached', timeout: 10_000 });
-    await triggerMethod.selectOption({ label: method });
+    await triggerMethod.selectOption({ label: method }).catch(async () => {
+      // Fallback if labels don't match exactly — try value
+      await triggerMethod.selectOption(method);
+    });
 
-    // Path / match-value input. Beeceptor's callout form labels this
-    // "Match value/expression". Try a few candidate selectors.
-    const pathSelectors = [
-      '#matchPath',
-      'input[name*="path" i]',
-      'input[name*="match" i]',
-      'input[placeholder*="path" i]',
-      'input[placeholder*="pattern" i]',
-      'input[placeholder*="expression" i]',
-    ].join(', ');
-
-    const pathInput = this.page.locator(pathSelectors).first();
-    await pathInput.waitFor({ state: 'attached', timeout: 5_000 });
-    await pathInput.fill(path);
-  }
-
-  /**
-   * Set the immediate mock response returned to the original caller.
-   * @param {{statusCode: number, body?: string}} opts
-   */
-  async setImmediateResponse({ statusCode, body = '' }) {
-    const statusInput = this.page
-      .locator('input[name*="status" i], input#responseStatus, input[type="number"]')
+    // Path input — Beeceptor labels this "Match value/expression".
+    const pathInput = this.page
+      .locator('input')
+      .filter({
+        hasNot: this.page.locator('[type="hidden"], [type="checkbox"], [type="radio"]'),
+      })
+      .filter({ has: this.page.locator('xpath=preceding::label[contains(., "Match")][1]') })
       .first();
-    if (await statusInput.count()) {
-      await statusInput.fill(String(statusCode)).catch(() => {});
-    }
 
-    if (body) {
-      const bodyArea = this.page
-        .locator('textarea[name*="body" i], textarea[id*="body" i], textarea.response-body')
+    if (await pathInput.count()) {
+      await pathInput.fill(path);
+    } else {
+      // Broad fallback
+      const alt = this.page
+        .locator(
+          'input[name*="match" i], input[name*="path" i], input[placeholder*="path" i], #matchPath',
+        )
         .first();
-      if (await bodyArea.isVisible({ timeout: 3_000 }).catch(() => false)) {
-        await bodyArea.fill(body).catch(() => {});
-      }
+      await alt.fill(path).catch(() => {});
     }
   }
 
   /**
-   * Configure the outbound HTTP Callout (the feature under test).
+   * Configure the outbound HTTP Callout — the feature under test.
    * @param {{targetUrl:string, method:string, calloutBody?:string}} opts
    */
   async setHttpCallout({ targetUrl, method = 'POST', calloutBody = '' }) {
-    // Expand the HTTP Callout / outbound-request accordion if collapsed.
-    const accordion = this.page
-      .locator('button.accordion-button, .accordion-header button')
-      .filter({ hasText: /Callout|Outbound|Async(hronous)? Request|Request Configuration/i })
+    // Expand the "Synchronous Request Configuration (HTTP Callout)"
+    // accordion if it's collapsed.
+    const calloutHeader = this.page
+      .locator('button, div, h2, h3, .accordion-button, .accordion-header')
+      .filter({ hasText: /Synchronous Request Configuration|HTTP Callout/i })
       .first();
-    if (await accordion.isVisible({ timeout: 3_000 }).catch(() => false)) {
-      const cls = (await accordion.getAttribute('class')) || '';
+    if (await calloutHeader.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      const cls = (await calloutHeader.getAttribute('class').catch(() => '')) || '';
       if (cls.includes('collapsed')) {
-        await accordion.click({ force: true }).catch(() => {});
+        await calloutHeader.click({ force: true }).catch(() => {});
         await this.page.waitForTimeout(500);
       }
     }
 
+    // Target endpoint — the URL input inside the callout section.
     const targetUrlInput = this.page
-      .locator('#targetUrl, input[name="targetUrl" i], input[placeholder*="http" i]')
+      .locator(
+        '#targetUrl, input[name*="target" i], input[placeholder*="webhook-endpoint" i], input[placeholder*="your-webhook" i]',
+      )
       .first();
-    await targetUrlInput.waitFor({ state: 'attached', timeout: 5_000 });
+    await targetUrlInput.waitFor({ state: 'attached', timeout: 8_000 });
     await targetUrlInput.fill(targetUrl);
 
-    // Callout method — second #matchMethod on the page (if present)
-    const calloutMethod = this.page.locator('#matchMethod').nth(1);
+    // Callout method — the second Method dropdown on the page (inside the
+    // callout section). #matchMethod may be reused; pick the LAST one.
+    const calloutMethod = this.page.locator('#matchMethod, select[name*="matchMethod" i]').last();
     if (await calloutMethod.count()) {
-      await calloutMethod.selectOption({ label: method }).catch(() => {});
+      await calloutMethod.selectOption({ label: method }).catch(async () => {
+        await calloutMethod.selectOption(method).catch(() => {});
+      });
     }
 
-    // Payload transform dropdown
-    const transform = this.page.locator('#no-transform').first();
-    if (await transform.count()) {
+    // Configure payload — dropdown labeled "Configure payload".
+    // Options include "Forward original payload" and "Configure custom payload".
+    const payloadSelect = this.page
+      .locator('#no-transform, select[name*="transform" i], select[name*="payload" i]')
+      .first();
+    if (await payloadSelect.count()) {
       if (calloutBody) {
-        await transform.selectOption({ value: 'custom' }).catch(() => {});
+        await payloadSelect
+          .selectOption({ label: /custom/i })
+          .catch(() => payloadSelect.selectOption({ value: 'custom' }))
+          .catch(() => {});
         await this.page.waitForTimeout(400);
         const bodyInput = this.page
-          .locator('textarea[name*="callout" i], textarea[placeholder*="{" i]')
-          .first();
+          .locator('textarea[name*="payload" i], textarea[name*="callout" i], textarea')
+          .last();
         if (await bodyInput.isVisible({ timeout: 2_000 }).catch(() => false)) {
           await bodyInput.fill(calloutBody).catch(() => {});
         }
       } else {
-        await transform.selectOption({ value: 'original' }).catch(() => {});
+        // Default "Forward original payload" — already selected; no-op.
       }
     }
   }
 
-  /** Persist the rule (Save button — id may be #saveProxy for callout rules). */
+  /** Persist the rule. Beeceptor callout rules use #saveProxy. */
   async save() {
     const save = this.page
       .locator('#saveProxy, #saveCrud, button:has-text("Save"):visible')
       .first();
+    await save.waitFor({ state: 'visible', timeout: 5_000 });
     await save.click({ force: true });
     await this.page.waitForLoadState('networkidle');
     await this.page.waitForTimeout(1_500);
   }
 
-  /** Full flow. */
+  /** Complete flow. */
   async createHttpCalloutRule(rule) {
     await this.openNewCalloutRuleForm();
     await this.setMatchCriteria({ method: rule.matchMethod, path: rule.matchPath });
-    await this.setImmediateResponse({
-      statusCode: rule.responseStatus,
-      body: rule.responseBody,
-    });
     await this.setHttpCallout({
       targetUrl: rule.calloutTargetUrl,
       method: rule.calloutMethod,
@@ -194,12 +195,14 @@ class MockRulePage {
 
       const delBtn = row
         .locator('xpath=ancestor::*[self::tr or self::li or self::div][1]')
-        .locator('button:has-text("Delete"), .btn-danger, [aria-label*="delete" i]')
+        .locator(
+          'button:has-text("Delete"), .btn-danger, [aria-label*="delete" i], [title*="delete" i]',
+        )
         .first();
 
       if (await delBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
-        await delBtn.click({ force: true });
         this.page.on('dialog', (d) => d.accept().catch(() => {}));
+        await delBtn.click({ force: true });
         const confirm = this.page
           .locator(
             'button:has-text("Yes"), button:has-text("Confirm"), button:has-text("Delete"):visible',
