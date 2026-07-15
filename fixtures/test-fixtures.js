@@ -8,36 +8,54 @@ const { ApiHelper } = require('../utils/api-helper');
 const { config } = require('../utils/config');
 
 /**
- * Custom Playwright test fixtures that inject page objects
- * and shared utilities into each test.
+ * Custom Playwright fixtures — inject page objects and shared utilities
+ * into each test, and pre-accept Beeceptor's GDPR cookie so the consent
+ * banner never intercepts pointer events during a run.
  */
 const test = base.test.extend({
-  /** Login page object */
+  /**
+   * Override the default `page` fixture to seed the `gdprConsent` cookie
+   * on beeceptor.com before any navigation. Mirrors the exact cookie that
+   * Beeceptor's "Accept" button sets on click.
+   */
+  page: async ({ page }, use) => {
+    // 2030-06-14 → matches Beeceptor's own expiry
+    const expiresAt = Math.floor(new Date('2030-06-14T07:00:00Z').getTime() / 1000);
+    await page.context().addCookies([
+      {
+        name: 'gdprConsent',
+        value: 'accepted',
+        domain: '.beeceptor.com',
+        path: '/',
+        expires: expiresAt,
+        sameSite: 'None',
+        secure: true,
+        httpOnly: false,
+      },
+    ]);
+    await use(page);
+  },
+
   loginPage: async ({ page }, use) => {
     await use(new LoginPage(page));
   },
 
-  /** Dashboard page object */
   dashboardPage: async ({ page }, use) => {
     await use(new DashboardPage(page));
   },
 
-  /** Endpoint console page object */
   endpointPage: async ({ page }, use) => {
     await use(new EndpointPage(page));
   },
 
-  /** Mock rule page object */
   mockRulePage: async ({ page }, use) => {
     await use(new MockRulePage(page));
   },
 
-  /** API helper for triggering endpoints */
   apiHelper: async ({ request }, use) => {
     await use(new ApiHelper(request));
   },
 
-  /** Test configuration */
   testConfig: async ({}, use) => {
     await use(config);
   },

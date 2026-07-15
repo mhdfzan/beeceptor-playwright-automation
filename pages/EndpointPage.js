@@ -26,11 +26,18 @@ class EndpointPage {
 
   /** Beeceptor shows a first-run wizard occasionally — skip it. */
   async dismissOnboardingIfPresent() {
+    // Dismiss the GDPR cookie banner first (it overlays other buttons).
+    const acceptCookies = this.page.locator('.accept-cookies, button:has-text("Accept")').first();
+    if (await acceptCookies.isVisible({ timeout: 1_000 }).catch(() => false)) {
+      await acceptCookies.click({ force: true }).catch(() => {});
+      await this.page.waitForTimeout(200);
+    }
+
     const skipBtn = this.page
       .locator('button:has-text("I\'ll explore myself!"), .skip-button')
       .first();
     if (await skipBtn.isVisible({ timeout: 2_000 }).catch(() => false)) {
-      await skipBtn.click();
+      await skipBtn.click({ force: true }).catch(() => {});
       await this.page.waitForTimeout(300);
     }
   }
