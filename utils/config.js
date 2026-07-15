@@ -26,6 +26,8 @@ const config = {
   endpoint: {
     /** If provided, reuse this endpoint (avoids Beeceptor free-tier rate limits). */
     reuseName: process.env.BEECEPTOR_ENDPOINT || '',
+    /** Optional — a second Beeceptor endpoint that will act as the callout target. */
+    calloutTargetName: process.env.CALLOUT_TARGET_ENDPOINT || '',
     /** Generate a unique endpoint name (fresh run) or return the reused one. */
     resolveName() {
       return this.reuseName || `pw-cal-${uniqueSuffix()}`;
@@ -50,7 +52,23 @@ const config = {
       null,
       2,
     ),
-    calloutTargetUrl: process.env.CALLOUT_TARGET_URL || 'https://httpbin.org/post',
+    /**
+     * Target URL for the outbound callout.
+     * Priority:
+     *   1. CALLOUT_TARGET_URL env var (explicit override — highest precedence)
+     *   2. CALLOUT_TARGET_ENDPOINT env var → https://<name>.free.beeceptor.com/callout-received
+     *      (enables round-trip verification against a second Beeceptor endpoint)
+     *   3. https://httpbin.org/post (default fallback)
+     */
+    get calloutTargetUrl() {
+      if (process.env.CALLOUT_TARGET_URL) return process.env.CALLOUT_TARGET_URL;
+      if (process.env.CALLOUT_TARGET_ENDPOINT) {
+        return `https://${process.env.CALLOUT_TARGET_ENDPOINT}.free.beeceptor.com/callout-received`;
+      }
+      return 'https://httpbin.org/post';
+    },
+    /** Path suffix appended to the callout target — used only for round-trip verification. */
+    calloutTargetPath: '/callout-received',
     calloutMethod: 'POST',
     /** '' means forward original payload; set to a JSON string to send a custom payload. */
     calloutBody: '',

@@ -8,7 +8,7 @@ outbound callout actually executed.
 
 ![Playwright](https://img.shields.io/badge/Playwright-2EAD33?logo=playwright&logoColor=white)
 ![Node.js](https://img.shields.io/badge/Node.js-%3E%3D18-339933?logo=node.js&logoColor=white)
-![CI](https://img.shields.io/badge/CI-GitHub_Actions-2088FF?logo=github-actions&logoColor=white)
+[![E2E](https://github.com/mhdfzan/beeceptor-playwright-automation/actions/workflows/e2e.yml/badge.svg)](https://github.com/mhdfzan/beeceptor-playwright-automation/actions/workflows/e2e.yml)
 ![License](https://img.shields.io/badge/License-MIT-blue)
 
 ---
@@ -34,17 +34,18 @@ suite verifies both halves of the behaviour.
 
 ## What this suite covers
 
-| #   | Step                     | What it validates                                                     |
-| --- | ------------------------ | --------------------------------------------------------------------- |
-| 1   | Login                    | Authenticates when credentials are supplied; skips gracefully if not. |
-| 2   | Create / Reuse endpoint  | New endpoint via UI, or reuse via `BEECEPTOR_ENDPOINT` env var.       |
-| 3   | Open Mock Rules panel    | Robust tab navigation with onboarding-wizard dismissal.               |
-| 4   | Author callout rule      | Fills match criteria, response, and outbound-request configuration.   |
-| 5   | Trigger endpoint         | Live POST via Playwright's `APIRequestContext`; asserts 202.          |
-| 6   | **Verify callout fired** | Opens the logged request in the console and asserts the outbound      |
-|     |                          | callout section is present and reports a success status.              |
-| 7   | Non-matching path        | Confirms unrelated paths do NOT hit the rule.                         |
-| 8   | Cleanup                  | Deletes the rule and (unless reusing) the endpoint.                   |
+| #   | Step                         | What it validates                                                                                                      |
+| --- | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| 1   | Login                        | Authenticates when credentials are supplied; skips gracefully if not.                                                  |
+| 2   | Create / Reuse endpoint      | New endpoint via UI, or reuse via `BEECEPTOR_ENDPOINT` env var.                                                        |
+| 3   | Open Mock Rules panel        | Robust tab navigation with onboarding-wizard dismissal.                                                                |
+| 4   | Author callout rule          | Fills match criteria, response, and outbound-request configuration.                                                    |
+| 5   | Trigger endpoint             | Live POST via Playwright's `APIRequestContext`; asserts 202.                                                           |
+| 6   | **Verify callout fired**     | Opens the logged request in the console and asserts the outbound                                                       |
+|     |                              | callout section is present and reports a success status.                                                               |
+| 7   | Non-matching path            | Confirms unrelated paths do NOT hit the rule.                                                                          |
+| 7b  | **Round-trip proof** _(opt)_ | With `CALLOUT_TARGET_ENDPOINT` set, opens the target endpoint's console and asserts the outbound request landed there. |
+| 8   | Cleanup                      | Deletes the rule and (unless reusing) the endpoint.                                                                    |
 
 The verification in **Step 6 is the interesting bit** — most naive tests
 only check that a request was logged. This suite goes further and asserts
@@ -58,6 +59,7 @@ Beeceptor recorded the outbound callout result too.
 beeceptor-playwright-automation/
 ├── .github/workflows/
 │   └── e2e.yml                 # GitHub Actions — lint + e2e on push/PR
+├── demo/                       # (generated) per-step videos from `npm run demo`
 ├── fixtures/
 │   └── test-fixtures.js        # Injects page objects into every test
 ├── pages/                      # Page Object Model
@@ -65,8 +67,10 @@ beeceptor-playwright-automation/
 │   ├── DashboardPage.js
 │   ├── EndpointPage.js         # ← callout verification lives here
 │   └── MockRulePage.js
+├── scripts/
+│   └── record-demo.js          # `npm run demo` — one-command demo recorder
 ├── tests/
-│   └── http-callout.spec.js    # 8 sequential test steps in one serial block
+│   └── http-callout.spec.js    # 9 sequential test steps in one serial block
 ├── utils/
 │   ├── config.js               # All URLs, timeouts, rule defaults
 │   └── api-helper.js           # Thin wrapper around Playwright's request API
@@ -128,6 +132,8 @@ npm run test:headed      # watch the browser drive the UI
 npm run test:slow        # 500ms slow-mo — great for demo videos
 npm run test:debug       # step through with Playwright Inspector
 npm run test:all-browsers # Chromium + Firefox + WebKit
+npm run demo             # runs test:slow AND copies every step's
+                         #   video into ./demo/ with readable names
 npm run report           # open the HTML report after a run
 ```
 
@@ -140,17 +146,75 @@ npm run format:check
 
 ---
 
-## Test artifacts
+## Round-trip verification (recommended)
+
+The default suite verifies the callout via **Beeceptor's own console UI** —
+it opens the logged request and asserts the outbound-callout section is
+present with a success status. That's already stronger than checking the
+request was merely received.
+
+For **bulletproof round-trip proof**, point the callout at a second
+Beeceptor endpoint you own and let the suite navigate to _its_ request log
+to confirm the outbound call arrived intact:
+
+```env
+# .env
+BEECEPTOR_ENDPOINT=my-callout-demo         # primary endpoint (has the rule)
+CALLOUT_TARGET_ENDPOINT=my-callout-target  # second endpoint (receives the callout)
+```
+
+When `CALLOUT_TARGET_ENDPOINT` is set:
+
+- The callout rule's target URL becomes `https://<name>.free.beeceptor.com/callout-received`.
+- Test **7b** activates — it opens the target endpoint's console, reloads
+  the request log, and asserts a request with path `/callout-received`
+  appeared. This proves the callout fired **AND** hit its target
+  successfully.
+
+If `CALLOUT_TARGET_ENDPOINT` is not set, Step 7b is transparently skipped
+and `httpbin.org/post` is used as a lightweight external target.
+
+---
+
+## Recording the demo video
+
+Every Playwright run auto-records each test step as its own `.webm` under
+`test-results/`. To make finding + sharing them trivial:
+
+```bash
+npm run demo
+```
+
+This wraps `test:slow` and, on completion, copies each step's video into a
+top-level `demo/` folder with readable names:
+
+```
+demo/
+├── 01-authenticate-skipped-if-no-credentials.webm
+├── 02-create-or-reuse-a-mock-endpoint.webm
+├── 03-open-the-mocking-rules-panel.webm
+├── 04-create-and-configure-the-http-callout-rule.webm
+├── 05-trigger-the-endpoint-immediate-response-should-match-rule.webm
+├── 06-verify-the-outbound-http-callout-actually-fired.webm
+├── 07-non-matching-path-does-not-trigger-the-callout.webm
+├── 07b-optional-round-trip-verify-via-second-beeceptor-endpoint.webm
+└── 08-cleanup-remove-rule-and-optionally-endpoint.webm
+```
+
+For the assignment submission, record a 2–3 minute screen+webcam voiceover
+on top of these clips (Loom / OBS / QuickTime) and attach it to the form.
+
+---
 
 After every run, the following land on disk (and are uploaded by CI):
 
-| Artifact         | Path                                           |
-| ---------------- | ---------------------------------------------- |
-| HTML report      | `playwright-report/index.html`                 |
-| Video recordings | `test-results/**/video.webm`                   |
-| Screenshots      | `test-results/06-callout-verification.png` &c. |
-| Traces           | `test-results/**/trace.zip` (on retry)         |
-| JSON results     | `test-results/results.json`                    |
+| Artifact         | Path                                                                             |
+| ---------------- | -------------------------------------------------------------------------------- |
+| HTML report      | `playwright-report/index.html`                                                   |
+| Video recordings | `test-results/**/video.webm`                                                     |
+| Screenshots      | `test-results/06-callout-verification.png`, `07b-roundtrip-verification.png` &c. |
+| Traces           | `test-results/**/trace.zip` (on retry)                                           |
+| JSON results     | `test-results/results.json`                                                      |
 
 ---
 
@@ -202,23 +266,23 @@ the feature actually fired, not just that Beeceptor received something.
 
 ### What I'd add next
 
-- **Second Beeceptor endpoint as the callout target** — poll its request log
-  via UI to independently confirm the outbound payload contents.
-- **Visual regression** snapshots of the console for the callout section.
+- **Data-driven parametrization** — sweep methods (GET/PUT/DELETE), paths, and payload transforms in one run.
+- **Visual regression** snapshots of the callout details panel.
 - **Retry semantics** for the callout target being briefly down.
-- **Data-driven tests** — parameterize methods (GET/PUT/DELETE), paths,
-  and payload transforms.
+- **Publish the HTML report to GitHub Pages** so reviewers can browse it without downloading artifacts.
 
 ---
 
 ## Demo video
 
-A 2–3 minute walkthrough is recorded in the accompanying submission form.
-It covers:
+Run `npm run demo` to produce clip files under `demo/` (see [Recording the
+demo video](#recording-the-demo-video) above). A 2–3 minute walkthrough with
+face + voiceover is submitted separately via the assignment form and covers:
 
 1. What the HTTP Callout feature does and why it matters.
 2. A live run of the suite (headed, slow-mo).
-3. The design decisions above — especially the outbound-callout verification.
+3. Key design decisions — the callout-verification step (6), the optional
+   round-trip step (7b), POM structure, and the CI pipeline.
 
 ---
 

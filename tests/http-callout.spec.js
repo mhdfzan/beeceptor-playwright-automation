@@ -157,6 +157,37 @@ test.describe('Beeceptor HTTP Callout Rule — E2E', () => {
     );
   });
 
+  test('7b. (optional) Round-trip verify via second Beeceptor endpoint', async ({
+    page,
+    endpointPage,
+  }) => {
+    const targetName = config.endpoint.calloutTargetName;
+    test.skip(!targetName, 'Set CALLOUT_TARGET_ENDPOINT to enable round-trip verification');
+
+    // Give Beeceptor a moment to fire the outbound callout after the earlier trigger
+    await page.waitForTimeout(config.timeouts.calloutSettle);
+
+    console.log(`↪  Opening callout-target endpoint console: ${targetName}`);
+    await endpointPage.goto(targetName);
+    await endpointPage.openRequestLog();
+
+    // The primary endpoint fired POST to /callout-received on the target
+    const row = await endpointPage.waitForRequestWithPath(
+      config.calloutRule.calloutTargetPath,
+      25_000,
+    );
+
+    await page.screenshot({
+      path: 'test-results/07b-roundtrip-verification.png',
+      fullPage: true,
+    });
+
+    await expect(row).toBeVisible();
+    console.log(
+      '✔  Callout target endpoint received the outbound request — full round-trip proven.',
+    );
+  });
+
   test('8. Cleanup — remove rule and (optionally) endpoint', async ({
     page,
     endpointPage,

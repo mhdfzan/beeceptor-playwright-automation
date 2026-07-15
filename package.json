@@ -9,6 +9,7 @@
     "test:debug": "npx playwright test --debug",
     "test:slow": "SLOW_MO=500 npx playwright test --headed",
     "test:all-browsers": "PW_ALL_BROWSERS=1 npx playwright test",
+    "demo": "node scripts/record-demo.js",
     "report": "npx playwright show-report",
     "install:browsers": "npx playwright install --with-deps chromium",
     "install:all-browsers": "npx playwright install --with-deps",

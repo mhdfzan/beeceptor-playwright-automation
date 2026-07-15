@@ -11,6 +11,9 @@ blob-report/
 playwright/.cache/
 playwright/.auth/
 
+# Auto-generated demo videos (from `npm run demo`)
+demo/
+
 # IDE
 .vscode/
 .idea/

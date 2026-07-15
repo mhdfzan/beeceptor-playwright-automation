@@ -40,32 +40,35 @@ engineering thinking, code quality, and testing depth.
 
 - ✅ 8-step serial test suite (was one monolithic test)
 - ✅ **Real outbound-callout verification** by clicking the logged request
-   and asserting the callout section + status code
+  and asserting the callout section + status code
 - ✅ Tightened selectors — favours stable IDs (`#matchMethod`, `#saveProxy`,
-   `#no-transform`, `#createNew`, `#targetUrl`) over fragile text/CSS
+  `#no-transform`, `#createNew`, `#targetUrl`) over fragile text/CSS
 - ✅ `.github/workflows/e2e.yml` — lint job + Playwright job, uploads
-   HTML report + videos + traces as artifacts
+  HTML report + videos + traces as artifacts
 - ✅ ESLint (`eslint-plugin-playwright`) + Prettier configs
 - ✅ Multi-browser support (`PW_ALL_BROWSERS=1` enables Firefox + WebKit)
 - ✅ Rewritten README (badges, layout diagram, design decisions,
-   approach section, demo-video placeholder)
+  approach section, demo-video placeholder)
 - ✅ Enriched `.env.example` with `CALLOUT_TARGET_URL`, `SLOW_MO`, `PW_ALL_BROWSERS`
 - ✅ New npm scripts: `lint`, `lint:fix`, `format`, `format:check`,
-   `test:all-browsers`, `install:all-browsers`
+  `test:all-browsers`, `install:all-browsers`
 
 ## Prioritized backlog
 
 **P1**
+
 - Add a second Beeceptor endpoint as the callout target and query its
   request log for full round-trip proof (currently we assert via the
   primary console UI only).
 
 **P2**
+
 - Data-driven parametrization: methods (GET/PUT/DELETE), paths, payload
   transforms.
 - Visual regression snapshots of the callout details panel.
 
 **P3**
+
 - Retry semantics if the callout target is briefly down.
 - Publish an HTML report to GitHub Pages via a `deploy-report.yml` workflow.
 
