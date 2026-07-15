@@ -26,18 +26,36 @@ class MockRulePage {
 
     let opened = false;
 
-    // Preferred path: split dropdown → "New Callout Rule"
-    const dropdownToggle = this.page
-      .locator('.dropdown-toggle-split, button.dropdown-toggle')
+    // Preferred path: split-dropdown caret — locate the button-group that
+    // contains a "New Rule" button, then pick the caret (last button in it).
+    const newRuleGroup = this.page
+      .locator('.btn-group, .input-group, div')
+      .filter({ has: this.page.locator('button:has-text("New Rule")') })
       .first();
-    if (await dropdownToggle.isVisible({ timeout: 2_000 }).catch(() => false)) {
-      await dropdownToggle.click({ force: true }).catch(() => {});
+
+    let caret = newRuleGroup
+      .locator(
+        'button.dropdown-toggle-split, button[data-bs-toggle="dropdown"], button[aria-haspopup="true"]',
+      )
+      .first();
+
+    // If no scoped caret found, fall back to any split-toggle on the page.
+    if (!(await caret.isVisible({ timeout: 1_500 }).catch(() => false))) {
+      caret = this.page
+        .locator(
+          'button.dropdown-toggle-split, button[data-bs-toggle="dropdown"][aria-expanded="false"]',
+        )
+        .last();
+    }
+
+    if (await caret.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      await caret.click({ force: true }).catch(() => {});
       await this.page.waitForTimeout(500);
       const calloutItem = this.page
-        .locator('.dropdown-menu a, .dropdown-menu button, .dropdown-item')
+        .locator('.dropdown-menu a, .dropdown-menu button, .dropdown-item, li a, li button')
         .filter({ hasText: /Callout|Proxy/i })
         .first();
-      if (await calloutItem.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      if (await calloutItem.isVisible({ timeout: 2_500 }).catch(() => false)) {
         await calloutItem.click({ force: true }).catch(() => {});
         opened = true;
       }
@@ -47,7 +65,7 @@ class MockRulePage {
     if (!opened) {
       const createBtn = this.page
         .locator(
-          '#createNew, button:has-text("Create New Rule"), button:has-text("+ New Rule"), button:has-text("New Rule")',
+          '#createNew, button:has-text("+ New Rule"), button:has-text("Create New Rule"), button:has-text("New Rule")',
         )
         .first();
       if (await createBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
