@@ -33,8 +33,10 @@ class EndpointPage {
       await this.page.waitForTimeout(200);
     }
 
+    // The onboarding "skip" button — target by class/aria-label so we don't
+    // depend on straight-vs-curly apostrophe in the visible text.
     const skipBtn = this.page
-      .locator('button:has-text("I\'ll explore myself!"), .skip-button')
+      .locator('.skip-button, [aria-label*="Skip onboarding" i], button[aria-label*="skip" i]')
       .first();
     if (await skipBtn.isVisible({ timeout: 2_000 }).catch(() => false)) {
       await skipBtn.click({ force: true }).catch(() => {});
@@ -62,14 +64,20 @@ class EndpointPage {
         await first.scrollIntoViewIfNeeded().catch(() => {});
         await first.click({ force: true });
         await this.page.waitForLoadState('networkidle');
-        return;
+        break;
       }
     }
 
-    throw new Error(
-      'Could not locate the "Mocking Rules" tab on the endpoint console. ' +
-        'Beeceptor UI may have changed — inspect the failure screenshot.',
-    );
+    // Wait for the rules panel to actually render — this is what the caller
+    // expects. Any of these markers means we're there.
+    const panelMarker = this.page
+      .locator(
+        '#createNew, .dropdown-toggle-split, button:has-text("New Rule"), button:has-text("Create New Rule")',
+      )
+      .first();
+    await panelMarker.waitFor({ state: 'visible', timeout: 15_000 }).catch(() => {
+      // Not fatal here — caller's assertion will surface a clearer error.
+    });
   }
 
   /** Switch back to the "Requests" (log) tab. */

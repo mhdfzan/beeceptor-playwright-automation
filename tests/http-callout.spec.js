@@ -36,6 +36,28 @@ test.describe('Beeceptor HTTP Callout Rule — E2E', () => {
     console.log('──────────────────────────────────────────────\n');
   });
 
+  /**
+   * Each test in a Playwright serial block still gets a fresh browser
+   * context. To avoid re-authenticating and re-navigating in every test,
+   * we open the endpoint console up front for the UI-driven steps.
+   */
+  test.beforeEach(async ({ page, loginPage, endpointPage }, testInfo) => {
+    // Skip navigation for tests that don't need the console open:
+    //   • Test 1 (login itself)
+    //   • Test 2 (creates endpoint from scratch)
+    //   • Tests that use only apiHelper — but we still open the console
+    //     since API tests inside a UI suite are fast and this keeps setup uniform.
+    if (testInfo.title.startsWith('1.') || testInfo.title.startsWith('2.')) return;
+
+    const { email, password } = config.credentials;
+    if (email && password && !(await loginPage.isLoggedIn())) {
+      await loginPage.login(email, password);
+    }
+    await endpointPage.goto(endpointName);
+    // Suppress any wandering listeners from previous tests
+    page.removeAllListeners('dialog');
+  });
+
   test('1. Authenticate (skipped if no credentials)', async ({ page, loginPage }) => {
     const { email, password } = config.credentials;
     if (!email || !password) {
@@ -58,7 +80,6 @@ test.describe('Beeceptor HTTP Callout Rule — E2E', () => {
   });
 
   test('3. Open the Mocking Rules panel', async ({ page, endpointPage }) => {
-    await endpointPage.goto(endpointName);
     await endpointPage.openMockingRules();
 
     const rulesPanel = page
@@ -67,7 +88,8 @@ test.describe('Beeceptor HTTP Callout Rule — E2E', () => {
     await expect(rulesPanel).toBeVisible({ timeout: 15_000 });
   });
 
-  test('4. Create and configure the HTTP Callout rule', async ({ mockRulePage }) => {
+  test('4. Create and configure the HTTP Callout rule', async ({ endpointPage, mockRulePage }) => {
+    await endpointPage.openMockingRules();
     await mockRulePage.createHttpCalloutRule(config.calloutRule);
 
     const listed = await mockRulePage.ruleExists(config.calloutRule.matchPath);
