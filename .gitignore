@@ -28,3 +28,9 @@ Thumbs.db
 *.log
 npm-debug.log*
 yarn.lock
+.env.*
+*.env
+credentials.json
+*.pem
+*.key
+.credentials
