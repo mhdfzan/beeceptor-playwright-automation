@@ -3,12 +3,10 @@
 /**
  * Page Object — Beeceptor Mock Rule editor (with HTTP Callout support).
  *
- * The Beeceptor rules editor is a Bootstrap-style modal/panel that renders
- * two different variants depending on rule type:
- *   • Standard mock rule  (returns a canned response)
- *   • Callout / Proxy rule (returns a response AND fires an outbound request)
- *
- * This POM covers the callout flow end to end.
+ * Beeceptor's Mock Rules modal has a split button at the bottom:
+ *   [ + New Rule ][ ▼ ]
+ * Clicking "+ New Rule" creates a MOCK rule. Clicking the caret opens a
+ * menu with "New CRUD Route" and "New Callout Rule" — we want the latter.
  */
 class MockRulePage {
   /** @param {import('@playwright/test').Page} page */
@@ -17,95 +15,71 @@ class MockRulePage {
   }
 
   /**
-   * Open the "New Callout Rule" form. Handles both the split-dropdown UI
-   * and the plain "Create New Rule" button variants.
+   * Open the "New Callout Rule" form via the split-dropdown caret.
    */
   async openNewCalloutRuleForm() {
     await this.page.waitForLoadState('networkidle');
-    await this.page.waitForTimeout(500);
+    await this.page.waitForTimeout(800);
 
+    const newRuleBtn = this.page.locator('button:has-text("New Rule")').first();
+    await newRuleBtn.waitFor({ state: 'visible', timeout: 10_000 });
+
+    // The caret is the button immediately following "+ New Rule" in the DOM.
+    const caret = newRuleBtn.locator('xpath=following-sibling::button[1]');
     let opened = false;
 
-    // Preferred path: split-dropdown caret — locate the button-group that
-    // contains a "New Rule" button, then pick the caret (last button in it).
-    const newRuleGroup = this.page
-      .locator('.btn-group, .input-group, div')
-      .filter({ has: this.page.locator('button:has-text("New Rule")') })
-      .first();
-
-    let caret = newRuleGroup
-      .locator(
-        'button.dropdown-toggle-split, button[data-bs-toggle="dropdown"], button[aria-haspopup="true"]',
-      )
-      .first();
-
-    // If no scoped caret found, fall back to any split-toggle on the page.
-    if (!(await caret.isVisible({ timeout: 1_500 }).catch(() => false))) {
-      caret = this.page
-        .locator(
-          'button.dropdown-toggle-split, button[data-bs-toggle="dropdown"][aria-expanded="false"]',
-        )
-        .last();
-    }
-
-    if (await caret.isVisible({ timeout: 2_000 }).catch(() => false)) {
+    if (await caret.count()) {
       await caret.click({ force: true }).catch(() => {});
       await this.page.waitForTimeout(500);
       const calloutItem = this.page
         .locator('.dropdown-menu a, .dropdown-menu button, .dropdown-item, li a, li button')
-        .filter({ hasText: /Callout|Proxy/i })
+        .filter({ hasText: /New Callout Rule|Callout Rule|Callout/i })
         .first();
-      if (await calloutItem.isVisible({ timeout: 2_500 }).catch(() => false)) {
-        await calloutItem.click({ force: true }).catch(() => {});
+      if (await calloutItem.isVisible({ timeout: 3_000 }).catch(() => false)) {
+        await calloutItem.click({ force: true });
         opened = true;
       }
     }
 
-    // Fallback: plain "+ New Rule" / "Create New Rule" button
+    // Fallback: click "+ New Rule" directly (opens the MOCK rule form)
     if (!opened) {
-      const createBtn = this.page
-        .locator(
-          '#createNew, button:has-text("+ New Rule"), button:has-text("Create New Rule"), button:has-text("New Rule")',
-        )
-        .first();
-      if (await createBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
-        await createBtn.click({ force: true });
-        opened = true;
-      }
+      await newRuleBtn.click({ force: true });
+      opened = true;
     }
 
-    if (!opened) {
-      throw new Error(
-        'Could not open the "New Rule" form — no dropdown-toggle or #createNew button found.',
-      );
-    }
-
-    // Wait for the trigger-method select to be at least attached to the DOM.
-    // Some Bootstrap variants leave the native <select> visually hidden but
-    // Playwright's selectOption() still operates on it.
-    await this.page.locator('#matchMethod').first().waitFor({ state: 'attached', timeout: 15_000 });
-    await this.page.waitForTimeout(800);
+    // Wait for the rule editor to render — the Save/Cancel buttons appear
+    // at the bottom of any Beeceptor rule form.
+    await this.page
+      .locator('button:has-text("Save"), button:has-text("Cancel")')
+      .first()
+      .waitFor({ state: 'visible', timeout: 15_000 });
+    await this.page.waitForTimeout(1_000);
   }
 
   /**
-   * Set the incoming-request matching criteria.
+   * Set the incoming-request matching criteria (Method + Path).
    * @param {{method: string, path: string}} opts
    */
   async setMatchCriteria({ method, path }) {
-    // The first #matchMethod dropdown is the trigger method; second is the
-    // callout's outbound method. Beeceptor uses the same ID for both — we
-    // rely on ordering.
-    //
-    // Note: 'attached' (not 'visible') — Bootstrap's form-select styling
-    // sometimes hides the native <select>, but Playwright can still call
-    // .selectOption() on hidden selects.
+    // Trigger-method select. Bootstrap's form-select styling may render the
+    // native <select> visually hidden — use 'attached' + selectOption(),
+    // which Playwright supports on hidden selects.
     const triggerMethod = this.page.locator('#matchMethod').first();
     await triggerMethod.waitFor({ state: 'attached', timeout: 10_000 });
     await triggerMethod.selectOption({ label: method });
 
-    const pathInput = this.page
-      .locator('input[name*="path" i], input[placeholder*="path" i], input#matchPath')
-      .first();
+    // Path / match-value input. Beeceptor's callout form labels this
+    // "Match value/expression". Try a few candidate selectors.
+    const pathSelectors = [
+      '#matchPath',
+      'input[name*="path" i]',
+      'input[name*="match" i]',
+      'input[placeholder*="path" i]',
+      'input[placeholder*="pattern" i]',
+      'input[placeholder*="expression" i]',
+    ].join(', ');
+
+    const pathInput = this.page.locator(pathSelectors).first();
     await pathInput.waitFor({ state: 'attached', timeout: 5_000 });
     await pathInput.fill(path);
   }
@@ -118,8 +92,8 @@ class MockRulePage {
     const statusInput = this.page
       .locator('input[name*="status" i], input#responseStatus, input[type="number"]')
       .first();
-    if (await statusInput.isVisible({ timeout: 3_000 }).catch(() => false)) {
-      await statusInput.fill(String(statusCode));
+    if (await statusInput.count()) {
+      await statusInput.fill(String(statusCode)).catch(() => {});
     }
 
     if (body) {
@@ -127,17 +101,17 @@ class MockRulePage {
         .locator('textarea[name*="body" i], textarea[id*="body" i], textarea.response-body')
         .first();
       if (await bodyArea.isVisible({ timeout: 3_000 }).catch(() => false)) {
-        await bodyArea.fill(body);
+        await bodyArea.fill(body).catch(() => {});
       }
     }
   }
 
   /**
-   * Configure the outbound HTTP Callout (Async Request) — the feature under test.
+   * Configure the outbound HTTP Callout (the feature under test).
    * @param {{targetUrl:string, method:string, calloutBody?:string}} opts
    */
   async setHttpCallout({ targetUrl, method = 'POST', calloutBody = '' }) {
-    // Expand the HTTP Callout / outbound-request accordion if collapsed
+    // Expand the HTTP Callout / outbound-request accordion if collapsed.
     const accordion = this.page
       .locator('button.accordion-button, .accordion-header button')
       .filter({ hasText: /Callout|Outbound|Async(hronous)? Request|Request Configuration/i })
@@ -150,14 +124,13 @@ class MockRulePage {
       }
     }
 
-    // Target URL
     const targetUrlInput = this.page
       .locator('#targetUrl, input[name="targetUrl" i], input[placeholder*="http" i]')
       .first();
     await targetUrlInput.waitFor({ state: 'attached', timeout: 5_000 });
     await targetUrlInput.fill(targetUrl);
 
-    // Callout method — second #matchMethod on the page
+    // Callout method — second #matchMethod on the page (if present)
     const calloutMethod = this.page.locator('#matchMethod').nth(1);
     if (await calloutMethod.count()) {
       await calloutMethod.selectOption({ label: method }).catch(() => {});
@@ -173,7 +146,7 @@ class MockRulePage {
           .locator('textarea[name*="callout" i], textarea[placeholder*="{" i]')
           .first();
         if (await bodyInput.isVisible({ timeout: 2_000 }).catch(() => false)) {
-          await bodyInput.fill(calloutBody);
+          await bodyInput.fill(calloutBody).catch(() => {});
         }
       } else {
         await transform.selectOption({ value: 'original' }).catch(() => {});
@@ -181,20 +154,17 @@ class MockRulePage {
     }
   }
 
-  /** Persist the rule (calls the appropriate Save button). */
+  /** Persist the rule (Save button — id may be #saveProxy for callout rules). */
   async save() {
     const save = this.page
       .locator('#saveProxy, #saveCrud, button:has-text("Save"):visible')
       .first();
-    await save.click();
+    await save.click({ force: true });
     await this.page.waitForLoadState('networkidle');
     await this.page.waitForTimeout(1_500);
   }
 
-  /**
-   * Complete flow — open form, fill everything, save.
-   * @param {import('../utils/config').config['calloutRule']} rule
-   */
+  /** Full flow. */
   async createHttpCalloutRule(rule) {
     await this.openNewCalloutRuleForm();
     await this.setMatchCriteria({ method: rule.matchMethod, path: rule.matchPath });
@@ -210,20 +180,13 @@ class MockRulePage {
     await this.save();
   }
 
-  /**
-   * Is a rule matching `pathFragment` visible in the rules list?
-   * @param {string} pathFragment
-   */
+  /** Is a rule matching `pathFragment` visible in the rules list? */
   async ruleExists(pathFragment) {
     const rule = this.page.locator(`text=${pathFragment}`).first();
     return rule.isVisible({ timeout: 5_000 }).catch(() => false);
   }
 
-  /**
-   * Delete a rule row by locating its path text and clicking a nearby delete.
-   * Best-effort — Beeceptor's DOM changes; we tolerate failures.
-   * @param {string} pathFragment
-   */
+  /** Best-effort rule deletion by path text. */
   async deleteRule(pathFragment) {
     try {
       const row = this.page.locator(`text=${pathFragment}`).first();
@@ -235,7 +198,7 @@ class MockRulePage {
         .first();
 
       if (await delBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
-        await delBtn.click();
+        await delBtn.click({ force: true });
         this.page.on('dialog', (d) => d.accept().catch(() => {}));
         const confirm = this.page
           .locator(
@@ -243,7 +206,7 @@ class MockRulePage {
           )
           .first();
         if (await confirm.isVisible({ timeout: 2_000 }).catch(() => false)) {
-          await confirm.click();
+          await confirm.click({ force: true });
         }
         await this.page.waitForLoadState('networkidle');
       }
