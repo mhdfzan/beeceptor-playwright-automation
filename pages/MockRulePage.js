@@ -32,32 +32,47 @@ class MockRulePage {
     const newRuleBtn = this.page.locator('button:has-text("New Rule")').first();
     await newRuleBtn.waitFor({ state: 'visible', timeout: 10_000 });
 
+    // Diagnostic: "before" state.
+    await this.page
+      .screenshot({ path: 'test-results/before-open-form.png', fullPage: true })
+      .catch(() => {});
+
     const caret = newRuleBtn.locator('xpath=following-sibling::button[1]');
-    let opened = false;
+    let openedViaCallout = false;
 
     if (await caret.count()) {
       await caret.click({ force: true }).catch(() => {});
-      await this.page.waitForTimeout(500);
+      await this.page.waitForTimeout(700);
       const calloutItem = this.page
         .locator('.dropdown-menu a, .dropdown-menu button, .dropdown-item, li a, li button')
         .filter({ hasText: /New Callout Rule|Callout Rule|Callout/i })
         .first();
       if (await calloutItem.isVisible({ timeout: 3_000 }).catch(() => false)) {
         await calloutItem.click({ force: true });
-        opened = true;
+        openedViaCallout = true;
       }
     }
 
-    if (!opened) {
+    if (!openedViaCallout) {
+      console.log(
+        'ℹ  Falling back to "+ New Rule" (mock form) — caret + callout flow did not work.',
+      );
       await newRuleBtn.click({ force: true });
     }
 
-    // Any Beeceptor rule form ends with Save + Cancel buttons.
+    // Let the modal animate open before we probe for fields.
+    await this.page.waitForTimeout(2_000);
     await this.page
-      .locator('button:has-text("Save"), button:has-text("Cancel")')
+      .screenshot({ path: 'test-results/after-open-form.png', fullPage: true })
+      .catch(() => {});
+
+    // Wait for the trigger-method select to be attached to the DOM. This is
+    // present in both mock and callout forms. Bootstrap may leave it visually
+    // hidden — that's OK, Playwright's selectOption() still operates on it.
+    await this.page
+      .locator('#matchMethod, select[name*="matchMethod" i]')
       .first()
-      .waitFor({ state: 'visible', timeout: 15_000 });
-    await this.page.waitForTimeout(1_000);
+      .waitFor({ state: 'attached', timeout: 15_000 });
   }
 
   /**
