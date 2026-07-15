@@ -24,24 +24,49 @@ class MockRulePage {
     await this.page.waitForLoadState('networkidle');
     await this.page.waitForTimeout(500);
 
+    let opened = false;
+
     // Preferred path: split dropdown → "New Callout Rule"
-    const dropdownToggle = this.page.locator('.dropdown-toggle-split').first();
-    if (await dropdownToggle.isVisible({ timeout: 3_000 }).catch(() => false)) {
-      await dropdownToggle.click();
-      const item = this.page
-        .locator('a, .dropdown-item')
-        .filter({ hasText: /Callout Rule/i })
+    const dropdownToggle = this.page
+      .locator('.dropdown-toggle-split, button.dropdown-toggle')
+      .first();
+    if (await dropdownToggle.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      await dropdownToggle.click({ force: true }).catch(() => {});
+      await this.page.waitForTimeout(500);
+      const calloutItem = this.page
+        .locator('.dropdown-menu a, .dropdown-menu button, .dropdown-item')
+        .filter({ hasText: /Callout|Proxy/i })
         .first();
-      await item.click();
-    } else {
-      const createBtn = this.page
-        .locator('#createNew, button:has-text("Create New Rule"), button:has-text("New Rule")')
-        .first();
-      await createBtn.click();
+      if (await calloutItem.isVisible({ timeout: 2_000 }).catch(() => false)) {
+        await calloutItem.click({ force: true }).catch(() => {});
+        opened = true;
+      }
     }
 
-    await this.page.waitForLoadState('networkidle');
-    await this.page.waitForTimeout(600);
+    // Fallback: plain "+ New Rule" / "Create New Rule" button
+    if (!opened) {
+      const createBtn = this.page
+        .locator(
+          '#createNew, button:has-text("Create New Rule"), button:has-text("+ New Rule"), button:has-text("New Rule")',
+        )
+        .first();
+      if (await createBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
+        await createBtn.click({ force: true });
+        opened = true;
+      }
+    }
+
+    if (!opened) {
+      throw new Error(
+        'Could not open the "New Rule" form — no dropdown-toggle or #createNew button found.',
+      );
+    }
+
+    // Wait for the trigger-method select to be at least attached to the DOM.
+    // Some Bootstrap variants leave the native <select> visually hidden but
+    // Playwright's selectOption() still operates on it.
+    await this.page.locator('#matchMethod').first().waitFor({ state: 'attached', timeout: 15_000 });
+    await this.page.waitForTimeout(800);
   }
 
   /**
@@ -52,14 +77,18 @@ class MockRulePage {
     // The first #matchMethod dropdown is the trigger method; second is the
     // callout's outbound method. Beeceptor uses the same ID for both — we
     // rely on ordering.
+    //
+    // Note: 'attached' (not 'visible') — Bootstrap's form-select styling
+    // sometimes hides the native <select>, but Playwright can still call
+    // .selectOption() on hidden selects.
     const triggerMethod = this.page.locator('#matchMethod').first();
-    await triggerMethod.waitFor({ state: 'visible', timeout: 10_000 });
+    await triggerMethod.waitFor({ state: 'attached', timeout: 10_000 });
     await triggerMethod.selectOption({ label: method });
 
     const pathInput = this.page
       .locator('input[name*="path" i], input[placeholder*="path" i], input#matchPath')
       .first();
-    await pathInput.waitFor({ state: 'visible', timeout: 5_000 });
+    await pathInput.waitFor({ state: 'attached', timeout: 5_000 });
     await pathInput.fill(path);
   }
 
@@ -98,7 +127,7 @@ class MockRulePage {
     if (await accordion.isVisible({ timeout: 3_000 }).catch(() => false)) {
       const cls = (await accordion.getAttribute('class')) || '';
       if (cls.includes('collapsed')) {
-        await accordion.click();
+        await accordion.click({ force: true }).catch(() => {});
         await this.page.waitForTimeout(500);
       }
     }
@@ -107,20 +136,20 @@ class MockRulePage {
     const targetUrlInput = this.page
       .locator('#targetUrl, input[name="targetUrl" i], input[placeholder*="http" i]')
       .first();
-    await targetUrlInput.waitFor({ state: 'visible', timeout: 5_000 });
+    await targetUrlInput.waitFor({ state: 'attached', timeout: 5_000 });
     await targetUrlInput.fill(targetUrl);
 
     // Callout method — second #matchMethod on the page
     const calloutMethod = this.page.locator('#matchMethod').nth(1);
-    if (await calloutMethod.isVisible({ timeout: 2_000 }).catch(() => false)) {
-      await calloutMethod.selectOption({ label: method });
+    if (await calloutMethod.count()) {
+      await calloutMethod.selectOption({ label: method }).catch(() => {});
     }
 
     // Payload transform dropdown
     const transform = this.page.locator('#no-transform').first();
-    if (await transform.isVisible({ timeout: 2_000 }).catch(() => false)) {
+    if (await transform.count()) {
       if (calloutBody) {
-        await transform.selectOption({ value: 'custom' });
+        await transform.selectOption({ value: 'custom' }).catch(() => {});
         await this.page.waitForTimeout(400);
         const bodyInput = this.page
           .locator('textarea[name*="callout" i], textarea[placeholder*="{" i]')
@@ -129,7 +158,7 @@ class MockRulePage {
           await bodyInput.fill(calloutBody);
         }
       } else {
-        await transform.selectOption({ value: 'original' });
+        await transform.selectOption({ value: 'original' }).catch(() => {});
       }
     }
   }
